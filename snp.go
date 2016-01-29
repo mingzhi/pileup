@@ -53,19 +53,19 @@ func Parse(line string) *SNP {
 	s.Ref = terms[0]
 	s.Pos = atoi(terms[1]) - 1
 	s.Base = terms[2][0]
-	bases := decodeReadBases(terms[3], s.Base)
-	quals := terms[4]
+	bases := decodeReadBases(terms[4], s.Base)
+	quals := terms[5]
 
 	var readIDs []int
 	var mapQs string
-	if len(terms) == 7 && terms[5][0] == '[' {
-		readIDs = decodeInts(terms[5])
+	if len(terms) == 8 && terms[6][0] == '[' {
+		readIDs = decodeInts(terms[6])
+		mapQs = terms[7]
+	} else if len(terms) == 7 {
 		mapQs = terms[6]
-	} else if len(terms) == 6 {
-		mapQs = terms[5]
 	}
 
-	for i := range terms[3] {
+	for i := range bases {
 		a := Allele{
 			Base: bases[i],
 			Qual: quals[i],
