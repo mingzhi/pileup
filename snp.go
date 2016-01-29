@@ -13,6 +13,7 @@ type SNP struct {
 	Base    byte
 	Pos     int
 	Alleles []Allele
+	Num     int
 }
 
 func (s *SNP) String() string {
@@ -53,6 +54,10 @@ func Parse(line string) *SNP {
 	s.Ref = terms[0]
 	s.Pos = atoi(terms[1]) - 1
 	s.Base = terms[2][0]
+	s.Num = atoi(terms[3])
+	if s.Num == 0 {
+		return &s
+	}
 	bases := decodeReadBases(terms[4], s.Base)
 	quals := terms[5]
 
