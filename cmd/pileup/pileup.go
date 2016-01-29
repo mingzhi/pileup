@@ -36,14 +36,17 @@ func main() {
 		genome = readGenome(*fastaFile)
 	}
 	snpChan := pileupReads(mappedReadChan, genome)
-	var w *os.File
+	var f *os.File
 	if *outFile != "" {
-		w = createFile(*outFile)
+		f = createFile(*outFile)
 	} else {
-		w = os.Stdout
+		f = os.Stdout
 	}
-	defer w.Close()
-	writeSNP(snpChan, os.Stdout)
+	defer f.Close()
+
+	w := bufio.NewWriter(f)
+	writeSNP(snpChan, w)
+	w.Flush()
 }
 
 type MappedRead struct {
