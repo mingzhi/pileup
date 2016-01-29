@@ -56,7 +56,7 @@ func Parse(line string) *SNP {
 	s.Base = terms[2][0]
 	s.Num = atoi(terms[3])
 	if s.Num == 0 {
-		return &s
+		return nil
 	}
 	bases := decodeReadBases(terms[4], s.Base)
 	quals := terms[5]
@@ -68,6 +68,11 @@ func Parse(line string) *SNP {
 		mapQs = terms[7]
 	} else if len(terms) == 7 {
 		mapQs = terms[6]
+	}
+
+	// check bases and quals len.
+	if len(bases) != s.Num || len(quals) != s.Num {
+		return nil
 	}
 
 	for i := range bases {

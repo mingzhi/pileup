@@ -22,7 +22,9 @@ func readPileup(f *os.File) chan *pileup.SNP {
 				break
 			}
 			s := pileup.Parse(line)
-			c <- s
+			if s != nil {
+				c <- s
+			}
 		}
 	}()
 
