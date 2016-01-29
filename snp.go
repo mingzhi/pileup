@@ -1,7 +1,9 @@
 package pileup
 
 import (
+	"bytes"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -51,7 +53,7 @@ func Parse(line string) *SNP {
 	s.Ref = terms[0]
 	s.Pos = atoi(terms[1]) - 1
 	s.Base = terms[2][0]
-	bases := terms[3]
+	bases := decodeReadBases(terms[3], s.Base)
 	quals := terms[4]
 
 	var readIDs []int
@@ -97,18 +99,45 @@ func decodeInts(s string) []int {
 	return values
 }
 
-func decodeBytes(s string) []byte {
-	values := []byte{}
-	l := len(s)
-	s = s[1 : l-1]
-	if len(s) > 0 {
-		terms := strings.Split(s, " ")
-		for i := range terms {
-			values = append(values, byte(atoi(terms[i])))
+func decodeReadBases(s string, ref byte) []byte {
+	r := regexp.MustCompile("\\^.")
+	s = r.ReplaceAllString(s, "")
+	s = strings.Replace(s, "$", "", -1)
+
+	r2 := regexp.MustCompile("[\\+-][0-9]+")
+	if r2.MatchString(s) {
+		insertNumbers := r2.FindAllString(s, -1)
+		insertIndex := r2.FindAllStringIndex(s, -1)
+		deletedPositions := make(map[int]bool)
+		for i := 0; i < len(insertNumbers); i++ {
+			start := insertIndex[i][0]
+			n := atoi(insertNumbers[i][1:])
+			for j := start; j < start+2+n; j++ {
+				deletedPositions[j] = true
+			}
+		}
+		bs := []byte{}
+		for i := 0; i < len(s); i++ {
+			if !deletedPositions[i] {
+				bs = append(bs, s[i])
+			}
+		}
+		s = string(bs)
+	}
+
+	bases := []byte{}
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		if b == '.' || b == ',' {
+			bases = append(bases, ref)
+		} else {
+			bases = append(bases, b)
 		}
 	}
 
-	return values
+	bases = bytes.ToUpper(bases)
+
+	return bases
 }
 
 func atoi(s string) int {
