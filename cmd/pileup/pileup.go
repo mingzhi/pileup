@@ -18,6 +18,7 @@ var (
 	minMQ     = kingpin.Flag("min-mq", "minimum mapping quality.").Default("0").Short('q').Int()
 	minBQ     = kingpin.Flag("min-bq", "minimum base quality").Default("13").Short('Q').Int()
 	fastaFile = kingpin.Flag("fasta-file", "reference genome in FASTA format").Short('f').String()
+	outFile   = kingpin.Flag("output", "output file").Short('o').String()
 	bamFile   = kingpin.Arg("bam-file", "bam or sam file").Required().String()
 )
 
@@ -35,6 +36,13 @@ func main() {
 		genome = readGenome(*fastaFile)
 	}
 	snpChan := pileupReads(mappedReadChan, genome)
+	var w *os.File
+	if *outFile != "" {
+		w = createFile(*outFile)
+	} else {
+		w = os.Stdout
+	}
+	defer w.Close()
 	writeSNP(snpChan, os.Stdout)
 }
 
@@ -281,4 +289,13 @@ func readGenome(filename string) []byte {
 	}
 
 	return ss[0].Seq
+}
+
+func createFile(filename string) *os.File {
+	w, err := os.Create(filename)
+	if err != nil {
+		panic(err)
+	}
+
+	return w
 }
