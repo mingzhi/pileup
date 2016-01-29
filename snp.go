@@ -31,7 +31,7 @@ func (s *SNP) String() string {
 		readIDStrs = append(readIDStrs, fmt.Sprintf("%d", readIDs[i]))
 	}
 
-	return fmt.Sprintf("%s\t%d\t%c\t%s\t%v\t%v\t%v", s.Ref, s.Pos+1, s.Base, bases, quals, readIDs, mapQs)
+	return fmt.Sprintf("%s\t%d\t%c\t%d\t%s\t%s\t%v\t%s", s.Ref, s.Pos+1, s.Base, len(bases), bases, quals, readIDs, mapQs)
 }
 
 type Allele struct {
@@ -52,16 +52,31 @@ func Parse(line string) *SNP {
 	s.Pos = atoi(terms[1]) - 1
 	s.Base = terms[2][0]
 	bases := terms[3]
-	quals := decodeBytes(terms[4])
-	readIDs := decodeInts(terms[5])
-	mapQs := decodeBytes(terms[6])
+	quals := terms[4]
+
+	var readIDs []int
+	var mapQs string
+	if len(terms) == 7 && terms[5][0] == '[' {
+		readIDs = decodeInts(terms[5])
+		mapQs = terms[6]
+	} else if len(terms) == 6 {
+		mapQs = terms[5]
+	}
+
 	for i := range terms[3] {
 		a := Allele{
-			Base:   bases[i],
-			Qual:   quals[i],
-			ReadID: readIDs[i],
-			MapQ:   mapQs[i],
+			Base: bases[i],
+			Qual: quals[i],
 		}
+
+		if len(readIDs) == len(bases) {
+			a.ReadID = readIDs[i]
+		}
+
+		if len(mapQs) == len(bases) {
+			a.MapQ = mapQs[i]
+		}
+
 		s.Alleles = append(s.Alleles, a)
 	}
 
