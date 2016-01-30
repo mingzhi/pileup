@@ -1,30 +1,25 @@
 package main
 
 import (
-	"bufio"
+	"encoding/json"
 	"github.com/mingzhi/pileup"
-	"io"
+	"log"
 	"os"
 )
 
-func readPileup(f *os.File) chan *pileup.SNP {
-	c := make(chan *pileup.SNP)
+func readPileup(f *os.File) chan pileup.SNP {
+	c := make(chan pileup.SNP)
 	go func() {
 		defer close(c)
 		defer f.Close()
-		rd := bufio.NewReader(f)
-		for {
-			line, err := rd.ReadString('\n')
+		decoder := json.NewDecoder(f)
+		for decoder.More() {
+			var s pileup.SNP
+			err := decoder.Decode(&s)
 			if err != nil {
-				if err != io.EOF {
-					panic(err)
-				}
-				break
+				log.Fatalln(err)
 			}
-			s := pileup.Parse(line)
-			if s != nil {
-				c <- s
-			}
+			c <- s
 		}
 	}()
 

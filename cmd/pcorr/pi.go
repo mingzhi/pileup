@@ -3,17 +3,21 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"log"
 	"os"
 )
 
 type cmdPi struct {
-	pileupFile string
-	outFile    string
-	minBQ      int
+	debug                  bool
+	pileupFile             string
+	outFile                string
+	minBQ                  int
+	regionStart, regionEnd int
 }
 
 type Pi struct {
 	Ref     string
+	Base    string
 	Pos     int
 	Alleles map[string]int
 }
@@ -45,26 +49,39 @@ func (c *cmdPi) Run() {
 	go func() {
 		defer close(piChan)
 		for s := range snpChan {
-			if len(s.Alleles) > 0 {
-				bases := []byte{}
-				quals := []byte{}
-				for _, a := range s.Alleles {
-					bases = append(bases, a.Base)
-					quals = append(quals, a.Qual)
-				}
-				bases1, _ := filterBases(bases, quals, c.minBQ)
-				bases1 = bytes.ToUpper(bases1)
-				m := make(map[string]int)
-				for _, b := range bases1 {
-					m[string(b)]++
-				}
+			if c.regionEnd > 0 && s.Pos > c.regionEnd {
+				break
+			}
+			if s.Pos >= c.regionStart {
+				if len(s.Alleles) > 0 {
+					bases := []byte{}
+					quals := []byte{}
+					for _, a := range s.Alleles {
+						bases = append(bases, a.Base)
+						quals = append(quals, a.Qual)
+					}
+					bases, _ = c.filterBases(bases, quals)
+					bases = bytes.ToUpper(bases)
 
-				pi := Pi{
-					Ref:     s.Ref,
-					Pos:     s.Pos,
-					Alleles: m,
+					m := make(map[string]int)
+					for _, b := range bases {
+						m[string(b)]++
+					}
+
+					pi := Pi{
+						Ref:     s.Ref,
+						Base:    string(s.Base),
+						Pos:     s.Pos,
+						Alleles: m,
+					}
+
+					if c.debug {
+						log.Println(string(bases))
+						log.Println(pi)
+					}
+
+					piChan <- pi
 				}
-				piChan <- pi
 			}
 		}
 	}()
@@ -80,13 +97,15 @@ func (c *cmdPi) Run() {
 	encoder := json.NewEncoder(w)
 
 	for pi := range piChan {
-		encoder.Encode(pi)
+		if err := encoder.Encode(pi); err != nil {
+			log.Fatalln(err)
+		}
 	}
 }
 
-func filterBases(bases []byte, quals []byte, cutoff int) (bases1, quals1 []byte) {
+func (c *cmdPi) filterBases(bases []byte, quals []byte) (bases1, quals1 []byte) {
 	for i := range bases {
-		if int(quals[i]) > cutoff {
+		if int(quals[i]) > c.minBQ {
 			bases1 = append(bases1, bases[i])
 			quals1 = append(quals1, quals[i])
 		}
