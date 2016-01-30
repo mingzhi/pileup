@@ -39,8 +39,8 @@ func (cmd *cmdCt) Run() {
 	snpChan := cmd.filterSNP(readPileup(f), profile, posType)
 
 	covsChan := cmd.calcCt(snpChan)
-	meanVars := cmd.collect(covsChan, cmd.maxl)
-	cmd.write(meanVars, cmd.outFile)
+	meanVars, xMVs, yMVs := cmd.collect(covsChan, cmd.maxl)
+	cmd.write(meanVars, xMVs, yMVs, cmd.outFile)
 }
 
 func (cmd *cmdCt) filterSNP(snpChan chan pileup.SNP, profile []profiling.Pos, posType byte) chan pileup.SNP {
@@ -145,7 +145,7 @@ func (cmd *cmdCt) findPairs(m map[int]pileup.Allele, mates []pileup.Allele) (pai
 	for _, b := range mates {
 		if isATGC(b.Base) {
 			a, found := m[b.ReadID]
-			if found {
+			if found && isATGC(b.Base) {
 				pairs = append(pairs, AllelePair{A: a, B: b})
 			}
 		}
@@ -154,18 +154,23 @@ func (cmd *cmdCt) findPairs(m map[int]pileup.Allele, mates []pileup.Allele) (pai
 }
 
 // collect
-func (cmd *cmdCt) collect(covsChan chan []*correlation.BivariateCovariance, maxl int) (meanVars []*meanvar.MeanVar) {
-	meanVars = []*meanvar.MeanVar{}
+func (cmd *cmdCt) collect(covsChan chan []*correlation.BivariateCovariance, maxl int) (meanVars, xMVs, yMVs []*meanvar.MeanVar) {
 	for i := 0; i < cmd.maxl; i++ {
 		meanVars = append(meanVars, meanvar.New())
+		xMVs = append(xMVs, meanvar.New())
+		yMVs = append(yMVs, meanvar.New())
 	}
 
 	for covs := range covsChan {
 		for i := range covs {
 			c := covs[i]
 			v := c.GetResult()
+			x := c.MeanX()
+			y := c.MeanY()
 			if !math.IsNaN(v) {
 				meanVars[i].Increment(v)
+				xMVs[i].Increment(x)
+				yMVs[i].Increment(y)
 			}
 		}
 	}
@@ -174,17 +179,18 @@ func (cmd *cmdCt) collect(covsChan chan []*correlation.BivariateCovariance, maxl
 }
 
 // write
-func (cmd *cmdCt) write(meanVars []*meanvar.MeanVar, filename string) {
+func (cmd *cmdCt) write(meanVars, xMVs, yMVs []*meanvar.MeanVar, filename string) {
 	w, err := os.Create(filename)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer w.Close()
-
+	mvs := [][]*meanvar.MeanVar{meanVars, xMVs, yMVs}
 	for i := 0; i < len(meanVars); i++ {
-		m := meanVars[i].Mean.GetResult()
-		v := meanVars[i].Var.GetResult()
-		n := meanVars[i].Mean.GetN()
-		w.WriteString(fmt.Sprintf("%d\t%g\t%g\t%d\n", i, m, v, n))
+		w.WriteString(fmt.Sprintf("%d\t", i))
+		for _, mv := range mvs {
+			w.WriteString(fmt.Sprintf("%g\t%g\t", mv[i].Mean.GetResult(), mv[i].Var.GetResult()))
+		}
+		w.WriteString(fmt.Sprintf("%d\n", mvs[0][i].Mean.GetN()))
 	}
 }
