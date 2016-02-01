@@ -10,6 +10,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"strings"
 )
 
 type cmdCt struct {
@@ -37,9 +38,23 @@ func (cmd *cmdCt) Run() {
 	}
 
 	posType := convertPosType(cmd.pos)
-	snpChan := cmd.filterSNP(readPileup(f), profile, posType)
+	// check file format.
+	fields := strings.Split(f.Name(), ".")
+	format := fields[len(fields)-1]
+	var snpChan chan *pileup.SNP
+	switch format {
+	case "pileup":
+		snpChan = readPileup(f)
+		break
+	case "mpileup":
+		snpChan = readMPileup(f)
+		break
+	default:
+		log.Fatalf("Can not recognize the pileup format\nFile should be ended with .pileup or .mpileup\n", format)
+	}
+	filteredSNPChan := cmd.filterSNP(snpChan, profile, posType)
 
-	covsChan := cmd.calcCt(snpChan)
+	covsChan := cmd.calcCt(filteredSNPChan)
 	meanVars, xMVs, yMVs := cmd.collect(covsChan, cmd.maxl)
 	cmd.write(meanVars, xMVs, yMVs, cmd.outFile)
 }
