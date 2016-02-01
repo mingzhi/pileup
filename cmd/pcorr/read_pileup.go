@@ -37,6 +37,7 @@ func readMPileup(f *os.File) chan *pileup.SNP {
 				if err != io.EOF {
 					log.Panic(err)
 				}
+				break
 			}
 			c <- s
 		}
