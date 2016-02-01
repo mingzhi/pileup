@@ -59,10 +59,9 @@ func (cmd *cmdPileup) pileupReads(mappedReadChan chan MappedRead, genome []byte)
 				pos := mr.Pos + i
 				if int(mr.Qual[i]) > cmd.minBQ {
 					a := Allele{
-						Base:   mr.Seq[i],
-						Qual:   mr.Qual[i],
-						ReadID: currentReadID,
-						MapQ:   mr.MapQ,
+						Base:  mr.Seq[i],
+						Qual:  mr.Qual[i],
+						QName: mr.ID,
 					}
 
 					if _, found := buffer[pos]; !found {

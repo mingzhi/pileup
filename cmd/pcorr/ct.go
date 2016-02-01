@@ -26,6 +26,7 @@ func (cmd *cmdCt) Run() {
 	} else {
 		f = openFile(cmd.pileupFile)
 	}
+	defer f.Close()
 
 	genome := readGenome(cmd.fastaFile)
 	gffs := readGff(cmd.gffFile)
@@ -43,8 +44,8 @@ func (cmd *cmdCt) Run() {
 	cmd.write(meanVars, xMVs, yMVs, cmd.outFile)
 }
 
-func (cmd *cmdCt) filterSNP(snpChan chan pileup.SNP, profile []profiling.Pos, posType byte) chan pileup.SNP {
-	c := make(chan pileup.SNP)
+func (cmd *cmdCt) filterSNP(snpChan chan *pileup.SNP, profile []profiling.Pos, posType byte) chan *pileup.SNP {
+	c := make(chan *pileup.SNP)
 	go func() {
 		defer close(c)
 		for s := range snpChan {
@@ -59,7 +60,7 @@ func (cmd *cmdCt) filterSNP(snpChan chan pileup.SNP, profile []profiling.Pos, po
 	return c
 }
 
-func (cmd *cmdCt) calcCt(snpChan chan pileup.SNP) chan []*correlation.BivariateCovariance {
+func (cmd *cmdCt) calcCt(snpChan chan *pileup.SNP) chan []*correlation.BivariateCovariance {
 	c := make(chan []*correlation.BivariateCovariance)
 	go func() {
 		defer close(c)
@@ -69,7 +70,7 @@ func (cmd *cmdCt) calcCt(snpChan chan pileup.SNP) chan []*correlation.BivariateC
 		}
 
 		currentChunkEnd := cmd.chunckSize + cmd.regionStart
-		snpArr := []pileup.SNP{}
+		snpArr := []*pileup.SNP{}
 		for s := range snpChan {
 			if s.Pos > currentChunkEnd {
 				c <- covs
@@ -94,12 +95,12 @@ func (cmd *cmdCt) calcCt(snpChan chan pileup.SNP) chan []*correlation.BivariateC
 	return c
 }
 
-func (cmd *cmdCt) calc(snpArr []pileup.SNP, covs []*correlation.BivariateCovariance) {
+func (cmd *cmdCt) calc(snpArr []*pileup.SNP, covs []*correlation.BivariateCovariance) {
 	s1 := snpArr[0]
-	m := make(map[int]pileup.Allele)
+	m := make(map[string]pileup.Allele)
 	for _, a := range s1.Alleles {
 		if isATGC(a.Base) {
-			m[a.ReadID] = a
+			m[a.QName] = a
 		}
 	}
 
@@ -141,10 +142,10 @@ type AllelePair struct {
 	A, B pileup.Allele
 }
 
-func (cmd *cmdCt) findPairs(m map[int]pileup.Allele, mates []pileup.Allele) (pairs []AllelePair) {
+func (cmd *cmdCt) findPairs(m map[string]pileup.Allele, mates []pileup.Allele) (pairs []AllelePair) {
 	for _, b := range mates {
 		if isATGC(b.Base) {
-			a, found := m[b.ReadID]
+			a, found := m[b.QName]
 			if found && isATGC(b.Base) {
 				pairs = append(pairs, AllelePair{A: a, B: b})
 			}

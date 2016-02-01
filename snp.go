@@ -19,36 +19,28 @@ type SNP struct {
 func (s *SNP) String() string {
 	bases := []byte{}
 	quals := []byte{}
-	readIDs := []int{}
-	mapQs := []byte{}
+	QNames := []string{}
 	for i := range s.Alleles {
 		a := s.Alleles[i]
 		bases = append(bases, a.Base)
 		quals = append(quals, a.Qual)
-		readIDs = append(readIDs, a.ReadID)
-		mapQs = append(mapQs, a.MapQ)
+		QNames = append(QNames, a.QName)
 	}
 
-	readIDStrs := []string{}
-	for i := range readIDStrs {
-		readIDStrs = append(readIDStrs, fmt.Sprintf("%d", readIDs[i]))
-	}
-
-	return fmt.Sprintf("%s\t%d\t%c\t%d\t%s\t%s\t%v\t%s", s.Ref, s.Pos+1, s.Base, len(bases), bases, quals, readIDs, mapQs)
+	return fmt.Sprintf("%s\t%d\t%c\t%d\t%s\t%s\t%v\t", s.Ref, s.Pos+1, s.Base, len(bases), bases, quals, strings.Join(QNames, ","))
 }
 
 type Allele struct {
-	Base   byte
-	Qual   byte
-	ReadID int
-	MapQ   byte
+	Base  byte
+	Qual  byte
+	QName string // read name
 }
 
 func (a Allele) String() string {
-	return fmt.Sprintf("Base: %c, Qual: %v, ReadID: %v, MapQ: %v", a.Base, a.Qual, a.ReadID, a.MapQ)
+	return fmt.Sprintf("Base: %c, Qual: %v, ReadID: %v", a.Base, a.Qual, a.QName)
 }
 
-func Parse(line string) *SNP {
+func parse(line string) *SNP {
 	var s SNP
 	terms := strings.Split(strings.TrimSpace(line), "\t")
 	s.Ref = terms[0]
@@ -61,13 +53,9 @@ func Parse(line string) *SNP {
 	bases := decodeReadBases(terms[4], s.Base)
 	quals := terms[5]
 
-	var readIDs []int
-	var mapQs string
-	if len(terms) == 8 && terms[6][0] == '[' {
-		readIDs = decodeInts(terms[6])
-		mapQs = terms[7]
-	} else if len(terms) == 7 {
-		mapQs = terms[6]
+	var QNames []string
+	if len(terms) == 7 {
+		QNames = strings.Split(terms[6], ",")
 	}
 
 	// check bases and quals len.
@@ -81,32 +69,14 @@ func Parse(line string) *SNP {
 			Qual: quals[i],
 		}
 
-		if len(readIDs) == len(bases) {
-			a.ReadID = readIDs[i]
-		}
-
-		if len(mapQs) == len(bases) {
-			a.MapQ = mapQs[i]
+		if len(QNames) == len(bases) {
+			a.QName = QNames[i]
 		}
 
 		s.Alleles = append(s.Alleles, a)
 	}
 
 	return &s
-}
-
-func decodeInts(s string) []int {
-	values := []int{}
-	l := len(s)
-	s = s[1 : l-1]
-	if len(s) > 0 {
-		terms := strings.Split(s, " ")
-		for i := range terms {
-			values = append(values, atoi(terms[i]))
-		}
-	}
-
-	return values
 }
 
 func decodeReadBases(s string, ref byte) []byte {
