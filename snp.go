@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"errors"
 )
 
 type SNP struct {
@@ -40,7 +41,7 @@ func (a Allele) String() string {
 	return fmt.Sprintf("Base: %c, Qual: %v, ReadID: %v", a.Base, a.Qual, a.QName)
 }
 
-func parse(line string) *SNP {
+func parse(line string) (*SNP, error) {
 	var s SNP
 	terms := strings.Split(strings.TrimSpace(line), "\t")
 	s.Ref = terms[0]
@@ -48,7 +49,7 @@ func parse(line string) *SNP {
 	s.Base = terms[2][0]
 	s.Num = atoi(terms[3])
 	if s.Num == 0 {
-		return nil
+		return &s, nil
 	}
 	bases := decodeReadBases(terms[4], s.Base)
 	quals := terms[5]
@@ -59,8 +60,13 @@ func parse(line string) *SNP {
 	}
 
 	// check bases and quals len.
-	if len(bases) != s.Num || len(quals) != s.Num {
-		return nil
+    if len(bases) != s.Num {
+        err := errors.New("Decode bases length did not match the indicated number.")
+        return nil, err
+    }
+	if len(quals) != s.Num {
+        err := errors.New("Decode quals length did not match the indicated number.")
+		return nil, err
 	}
 
 	for i := range bases {
@@ -76,7 +82,7 @@ func parse(line string) *SNP {
 		s.Alleles = append(s.Alleles, a)
 	}
 
-	return &s
+	return &s, nil
 }
 
 func decodeReadBases(s string, ref byte) []byte {

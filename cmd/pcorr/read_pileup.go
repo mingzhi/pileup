@@ -17,7 +17,11 @@ func readPileup(f *os.File) chan *pileup.SNP {
 			var s *pileup.SNP
 			err := decoder.Decode(&s)
 			if err != nil {
-				log.Fatalln(err)
+                if *debug {
+                    log.Panic(err)
+                } else {
+				    log.Fatalln(err)
+                }
 			}
 			c <- s
 		}
@@ -35,7 +39,12 @@ func readMPileup(f *os.File) chan *pileup.SNP {
 			s, err := reader.Read()
 			if err != nil {
 				if err != io.EOF {
-					log.Panic(err)
+                    if *debug {
+                       log.Panic(err) 
+                    } else {
+                       log.Fatalln(err)
+                    }
+					
 				}
 				break
 			}

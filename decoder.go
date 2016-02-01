@@ -19,9 +19,9 @@ func (d *Reader) Read() (s *SNP, err error) {
 	var line string
 	line, err = d.r.ReadString('\n')
 	if err != nil {
-		return
+		return nil, err
 	}
 
-	s = parse(line)
-	return s, nil
+	s, err = parse(line)
+	return s, err
 }
