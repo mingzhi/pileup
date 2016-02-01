@@ -91,8 +91,9 @@ func decodeReadBases(s string, ref byte) []byte {
 		deletedPositions := make(map[int]bool)
 		for i := 0; i < len(insertNumbers); i++ {
 			start := insertIndex[i][0]
-			n := atoi(insertNumbers[i][1:])
-			for j := start; j < start+2+n; j++ {
+            digit := insertNumbers[i][1:]
+			n := atoi(digit)
+			for j := start; j < start+len(digit)+n; j++ {
 				deletedPositions[j] = true
 			}
 		}
