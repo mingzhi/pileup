@@ -2,15 +2,17 @@ package main
 
 import (
 	"fmt"
+	"log"
+	"math"
+	"os"
+
+	"runtime"
+
 	"github.com/mingzhi/gomath/stat/correlation"
 	"github.com/mingzhi/gomath/stat/desc/meanvar"
 	"github.com/mingzhi/ncbiftp/genomes/profiling"
 	"github.com/mingzhi/ncbiftp/taxonomy"
 	"github.com/mingzhi/pileup"
-	"log"
-	"math"
-	"os"
-	"strings"
 )
 
 type cmdCt struct {
@@ -38,28 +40,15 @@ func (cmd *cmdCt) Run() {
 	}
 
 	posType := convertPosType(cmd.pos)
-	// check file format.
-	fields := strings.Split(f.Name(), ".")
-	format := fields[len(fields)-1]
-	var snpChan chan *pileup.SNP
-	switch format {
-	case "pileup":
-		snpChan = readPileup(f)
-		break
-	case "mpileup":
-		snpChan = readMPileup(f)
-		break
-	default:
-		log.Fatalf("Can not recognize the pileup format\nFile should be ended with .pileup or .mpileup\n", format)
-	}
+	snpChan := readPileup(f, cmd.regionStart, cmd.regionEnd)
 	filteredSNPChan := cmd.filterSNP(snpChan, profile, posType)
-
-	covsChan := cmd.calcCt(filteredSNPChan)
+	snpChanChan := cmd.splitChuncks(filteredSNPChan)
+	covsChan := cmd.calcCt(snpChanChan)
 	meanVars, xMVs, yMVs := cmd.collect(covsChan, cmd.maxl)
 	cmd.write(meanVars, xMVs, yMVs, cmd.outFile)
 }
 
-func (cmd *cmdCt) filterSNP(snpChan chan *pileup.SNP, profile []profiling.Pos, posType byte) chan *pileup.SNP {
+func (cmd *cmdCt) filterSNP(snpChan <-chan *pileup.SNP, profile []profiling.Pos, posType byte) chan *pileup.SNP {
 	c := make(chan *pileup.SNP)
 	go func() {
 		defer close(c)
@@ -75,39 +64,92 @@ func (cmd *cmdCt) filterSNP(snpChan chan *pileup.SNP, profile []profiling.Pos, p
 	return c
 }
 
-func (cmd *cmdCt) calcCt(snpChan chan *pileup.SNP) chan []*correlation.BivariateCovariance {
-	c := make(chan []*correlation.BivariateCovariance)
+func (cmd *cmdCt) calcOne(snpChan chan *pileup.SNP) []*correlation.BivariateCovariance {
+	ncpu := runtime.GOMAXPROCS(0)
+
+	// create jobs.
+	jobChan := make(chan []*pileup.SNP)
 	go func() {
-		defer close(c)
-		covs := []*correlation.BivariateCovariance{}
-		for i := 0; i < cmd.maxl; i++ {
-			covs = append(covs, correlation.NewBivariateCovariance(false))
-		}
-
-		currentChunkEnd := cmd.chunckSize + cmd.regionStart
-		snpArr := []*pileup.SNP{}
+		defer close(jobChan)
+		arr := []*pileup.SNP{}
 		for s := range snpChan {
-			if s.Pos > currentChunkEnd {
-				c <- covs
-				covs = []*correlation.BivariateCovariance{}
-				for i := 0; i < cmd.maxl; i++ {
-					covs = append(covs, correlation.NewBivariateCovariance(false))
-				}
-				currentChunkEnd += cmd.chunckSize
-			}
-
-			snpArr = append(snpArr, s)
-			lag := s.Pos - snpArr[0].Pos
+			arr = append(arr, s)
+			lag := s.Pos - arr[0].Pos
 			if lag >= cmd.maxl {
-				cmd.calc(snpArr, covs)
-				snpArr = snpArr[1:]
+				jobChan <- arr
+				arr = arr[1:]
 			}
 		}
-		cmd.calc(snpArr, covs)
-		c <- covs
+		jobChan <- arr
 	}()
 
-	return c
+	c := make(chan []*correlation.BivariateCovariance)
+	for i := 0; i < ncpu; i++ {
+		go func() {
+			covs := createCovariances(cmd.maxl)
+			for arr := range jobChan {
+				cmd.calc(arr, covs)
+			}
+			c <- covs
+		}()
+	}
+
+	var covs []*correlation.BivariateCovariance
+	for i := 0; i < ncpu; i++ {
+		cc := <-c
+		if i == 0 {
+			covs = cc
+		} else {
+			for k := 0; k < len(covs); k++ {
+				covs[k].Append(cc[k])
+			}
+		}
+	}
+
+	return covs
+}
+
+func (cmd *cmdCt) splitChuncks(snpChan chan *pileup.SNP) chan chan *pileup.SNP {
+	cc := make(chan chan *pileup.SNP)
+	go func() {
+		defer close(cc)
+		currentChunkEnd := cmd.chunckSize + cmd.regionStart
+		c := make(chan *pileup.SNP)
+		cc <- c
+		for s := range snpChan {
+			if s.Pos > currentChunkEnd {
+				close(c)
+				c = make(chan *pileup.SNP)
+				cc <- c
+				currentChunkEnd += cmd.chunckSize
+			}
+			c <- s
+		}
+		close(c)
+	}()
+	return cc
+}
+
+func (cmd *cmdCt) calcCt(snpChanChan chan chan *pileup.SNP) chan []*correlation.BivariateCovariance {
+	cc := make(chan []*correlation.BivariateCovariance)
+
+	go func() {
+		defer close(cc)
+		for snpChan := range snpChanChan {
+			covs := cmd.calcOne(snpChan)
+			cc <- covs
+		}
+	}()
+
+	return cc
+}
+
+func createCovariances(maxl int) []*correlation.BivariateCovariance {
+	covs := []*correlation.BivariateCovariance{}
+	for i := 0; i < maxl; i++ {
+		covs = append(covs, correlation.NewBivariateCovariance(false))
+	}
+	return covs
 }
 
 func (cmd *cmdCt) calc(snpArr []*pileup.SNP, covs []*correlation.BivariateCovariance) {

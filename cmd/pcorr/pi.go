@@ -3,10 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/mingzhi/pileup"
 	"log"
 	"os"
-	"strings"
 )
 
 type cmdPi struct {
@@ -47,20 +45,7 @@ func (p Pi) Pi() (pi float64) {
 func (c *cmdPi) Run() {
 	f := openFile(c.pileupFile)
 	defer f.Close()
-	// check file format.
-	fields := strings.Split(f.Name(), ".")
-	format := fields[len(fields)-1]
-	var snpChan chan *pileup.SNP
-	switch format {
-	case "pileup":
-		snpChan = readPileup(f)
-		break
-	case "mpileup":
-		snpChan = readMPileup(f)
-		break
-	default:
-		log.Fatalf("Can not recognize the pileup format\nFile should be ended with .pileup or .mpileup\n", format)
-	}
+	snpChan := readPileup(f, 0, 0)
 	piChan := make(chan Pi)
 	go func() {
 		defer close(piChan)
