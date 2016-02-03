@@ -1,15 +1,16 @@
 package main
 
 import (
-	"github.com/alecthomas/kingpin"
 	"os"
 	"runtime"
+
+	"github.com/alecthomas/kingpin"
 )
 
 var (
 	app   = kingpin.New("pcorr", "A command-line application for correlation calculation.")
 	debug = app.Flag("debug", "Enable debug mode.").Bool()
-    ncpu = app.Flag("ncpu", "number of CPUs for using").Default("1").Int()
+	ncpu  = app.Flag("ncpu", "number of CPUs for using").Default("1").Int()
 
 	pileupApp       = app.Command("pileup", "pileup reads")
 	pileupMinBQ     = pileupApp.Flag("min-BQ", "minimum base quality").Short('Q').Default("13").Int()
@@ -76,7 +77,7 @@ func main() {
 		piCmd.Run()
 		break
 	case ctApp.FullCommand():
-        runtime.GOMAXPROCS(*ncpu)
+		runtime.GOMAXPROCS(*ncpu)
 		ctCmd := cmdCt{
 			codonTableID: *ctCondonTableID,
 			maxl:         *ctMaxL,
@@ -89,6 +90,7 @@ func main() {
 			fastaFile:    *ctFastaFile,
 			gffFile:      *ctGffFile,
 			outFile:      *ctOutFile,
+			debug:        *debug,
 		}
 		ctCmd.Run()
 		break
