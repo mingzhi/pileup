@@ -152,8 +152,11 @@ func (cmd *cmdCt) calcInChunck(snpChan chan *pileup.SNP) *calc.Calculator {
 	for i := 0; i < ncpu; i++ {
 		go func() {
 			covs := calc.New(cmd.maxl)
+            maxN := 10000
+            xArr := make([]float64, maxN)
+            yArr := make([]float64, maxN)
 			for arr := range jobChan {
-				cmd.calcSNPArr(arr, covs)
+				cmd.calcSNPArr(arr, covs, xArr, yArr)
 			}
 			c <- covs
 		}()
@@ -219,7 +222,7 @@ func (cmd *cmdCt) doCalculation(snpChanChan chan chan *pileup.SNP) chan *calc.Ca
 // and compute several correlations, which is contained in a calculator.
 // A calculator here is a black box.
 // calcSNPArr only push inputs into the calculator.
-func (cmd *cmdCt) calcSNPArr(snpArr []*pileup.SNP, calculator *calc.Calculator) {
+func (cmd *cmdCt) calcSNPArr(snpArr []*pileup.SNP, calculator *calc.Calculator, xArr, yArr []float64) {
 	s1 := snpArr[0]
 	m := make(map[string]pileup.Allele)
 	for _, a := range s1.Alleles {
@@ -228,9 +231,6 @@ func (cmd *cmdCt) calcSNPArr(snpArr []*pileup.SNP, calculator *calc.Calculator) 
 		}
 	}
 
-	n := (len(m) * (len(m) - 1)) / 2
-	xArr := make([]float64, n)
-	yArr := make([]float64, n)
 	pairs := make([]AllelePair, len(m))
 	for k := 0; k < len(snpArr); k++ {
 		s2 := snpArr[k]
@@ -253,9 +253,9 @@ func (cmd *cmdCt) calcSNPArr(snpArr []*pileup.SNP, calculator *calc.Calculator) 
 		}
 
 		k := 0
-		for i := 0; i < numPair; i++ {
+		for i := 0; i < numPair && k < len(xArr); i++ {
 			p1 := pairs[i]
-			for j := i + 1; j < numPair; j++ {
+			for j := i + 1; j < numPair && k < len(xArr); j++ {
 				p2 := pairs[j]
 				x := cmd.diffBases(p1.A.Base, p2.A.Base)
 				y := cmd.diffBases(p1.B.Base, p2.B.Base)
