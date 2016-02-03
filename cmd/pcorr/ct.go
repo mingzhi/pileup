@@ -2,17 +2,13 @@ package main
 
 import (
 	"fmt"
-	"log"
-	"math"
-	"os"
-
-	"runtime"
-
-	"github.com/mingzhi/gomath/stat/correlation"
-	"github.com/mingzhi/gomath/stat/desc/meanvar"
 	"github.com/mingzhi/ncbiftp/genomes/profiling"
 	"github.com/mingzhi/ncbiftp/taxonomy"
 	"github.com/mingzhi/pileup"
+	"github.com/mingzhi/pileup/cov"
+	"log"
+	"os"
+	"runtime"
 )
 
 type cmdCt struct {
@@ -44,8 +40,8 @@ func (cmd *cmdCt) Run() {
 	filteredSNPChan := cmd.filterSNP(snpChan, profile, posType)
 	snpChanChan := cmd.splitChuncks(filteredSNPChan)
 	covsChan := cmd.calcCt(snpChanChan)
-	meanVars, xMVs, yMVs := cmd.collect(covsChan, cmd.maxl)
-	cmd.write(meanVars, xMVs, yMVs, cmd.outFile)
+	csMeanVars, crMeanVars, ctMeanVars := cmd.collect(covsChan, cmd.maxl)
+	cmd.write(csMeanVars, crMeanVars, ctMeanVars, cmd.outFile)
 }
 
 func (cmd *cmdCt) filterSNP(snpChan <-chan *pileup.SNP, profile []profiling.Pos, posType byte) chan *pileup.SNP {
@@ -64,7 +60,7 @@ func (cmd *cmdCt) filterSNP(snpChan <-chan *pileup.SNP, profile []profiling.Pos,
 	return c
 }
 
-func (cmd *cmdCt) calcOne(snpChan chan *pileup.SNP) []*correlation.BivariateCovariance {
+func (cmd *cmdCt) calcOne(snpChan chan *pileup.SNP) *cov.Calculator {
 	ncpu := runtime.GOMAXPROCS(0)
 
 	// create jobs.
@@ -83,10 +79,10 @@ func (cmd *cmdCt) calcOne(snpChan chan *pileup.SNP) []*correlation.BivariateCova
 		jobChan <- arr
 	}()
 
-	c := make(chan []*correlation.BivariateCovariance)
+	c := make(chan *cov.Calculator)
 	for i := 0; i < ncpu; i++ {
 		go func() {
-			covs := createCovariances(cmd.maxl)
+			covs := cov.NewCalculator(cmd.maxl)
 			for arr := range jobChan {
 				cmd.calc(arr, covs)
 			}
@@ -94,15 +90,13 @@ func (cmd *cmdCt) calcOne(snpChan chan *pileup.SNP) []*correlation.BivariateCova
 		}()
 	}
 
-	var covs []*correlation.BivariateCovariance
+	var covs *cov.Calculator
 	for i := 0; i < ncpu; i++ {
 		cc := <-c
 		if i == 0 {
 			covs = cc
 		} else {
-			for k := 0; k < len(covs); k++ {
-				covs[k].Append(cc[k])
-			}
+			covs.Append(cc)
 		}
 	}
 
@@ -130,8 +124,8 @@ func (cmd *cmdCt) splitChuncks(snpChan chan *pileup.SNP) chan chan *pileup.SNP {
 	return cc
 }
 
-func (cmd *cmdCt) calcCt(snpChanChan chan chan *pileup.SNP) chan []*correlation.BivariateCovariance {
-	cc := make(chan []*correlation.BivariateCovariance)
+func (cmd *cmdCt) calcCt(snpChanChan chan chan *pileup.SNP) chan *cov.Calculator {
+	cc := make(chan *cov.Calculator)
 
 	go func() {
 		defer close(cc)
@@ -144,15 +138,7 @@ func (cmd *cmdCt) calcCt(snpChanChan chan chan *pileup.SNP) chan []*correlation.
 	return cc
 }
 
-func createCovariances(maxl int) []*correlation.BivariateCovariance {
-	covs := []*correlation.BivariateCovariance{}
-	for i := 0; i < maxl; i++ {
-		covs = append(covs, correlation.NewBivariateCovariance(false))
-	}
-	return covs
-}
-
-func (cmd *cmdCt) calc(snpArr []*pileup.SNP, covs []*correlation.BivariateCovariance) {
+func (cmd *cmdCt) calc(snpArr []*pileup.SNP, calculator *cov.Calculator) {
 	s1 := snpArr[0]
 	m := make(map[string]pileup.Allele)
 	for _, a := range s1.Alleles {
@@ -170,28 +156,27 @@ func (cmd *cmdCt) calc(snpArr []*pileup.SNP, covs []*correlation.BivariateCovari
 
 		pairs := cmd.findPairs(m, s2.Alleles)
 		if len(pairs) > cmd.minCoverage {
+			xArr := []float64{}
+			yArr := []float64{}
 			for i := 0; i < len(pairs); i++ {
 				for j := i + 1; j < len(pairs); j++ {
-					var x, y float64
 					p1 := pairs[i]
 					p2 := pairs[j]
 					if p1.A.Base != p2.A.Base {
-						x = 1
+						xArr = append(xArr, 1)
 					} else {
-						x = 0
+						xArr = append(xArr, 0)
 					}
 
 					if p1.B.Base != p2.B.Base {
-						y = 1
+						yArr = append(yArr, 1)
 					} else {
-						y = 0
+						yArr = append(yArr, 0)
 					}
-
-					covs[l].Increment(x, y)
 				}
 			}
+			calculator.Calc(xArr, yArr, l)
 		}
-
 	}
 }
 
@@ -212,24 +197,20 @@ func (cmd *cmdCt) findPairs(m map[string]pileup.Allele, mates []pileup.Allele) (
 }
 
 // collect
-func (cmd *cmdCt) collect(covsChan chan []*correlation.BivariateCovariance, maxl int) (meanVars, xMVs, yMVs []*meanvar.MeanVar) {
-	for i := 0; i < cmd.maxl; i++ {
-		meanVars = append(meanVars, meanvar.New())
-		xMVs = append(xMVs, meanvar.New())
-		yMVs = append(yMVs, meanvar.New())
-	}
+func (cmd *cmdCt) collect(calculatorChan chan *cov.Calculator, maxl int) (csMeanVars, crMeanVars, ctMeanVars *cov.MeanVariances) {
 
-	for covs := range covsChan {
-		for i := range covs {
-			c := covs[i]
-			v := c.GetResult()
-			x := c.MeanX()
-			y := c.MeanY()
-			if !math.IsNaN(v) {
-				meanVars[i].Increment(v)
-				xMVs[i].Increment(x)
-				yMVs[i].Increment(y)
-			}
+	csMeanVars = cov.NewMeanVariances(cmd.maxl)
+	ctMeanVars = cov.NewMeanVariances(cmd.maxl)
+	crMeanVars = cov.NewMeanVariances(cmd.maxl)
+
+	for calculator := range calculatorChan {
+		for i := 0; i < calculator.MaxL; i++ {
+			cs := calculator.Cs.GetMean(i)
+			cr := calculator.Cr.GetResult(i)
+			ct := calculator.Ct.GetResult(i)
+			csMeanVars.Increment(i, cs)
+			crMeanVars.Increment(i, cr)
+			ctMeanVars.Increment(i, ct)
 		}
 	}
 
@@ -237,18 +218,18 @@ func (cmd *cmdCt) collect(covsChan chan []*correlation.BivariateCovariance, maxl
 }
 
 // write
-func (cmd *cmdCt) write(meanVars, xMVs, yMVs []*meanvar.MeanVar, filename string) {
+func (cmd *cmdCt) write(csMeanVars, crMeanVars, ctMeanVars *cov.MeanVariances, filename string) {
 	w, err := os.Create(filename)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer w.Close()
-	mvs := [][]*meanvar.MeanVar{meanVars, xMVs, yMVs}
-	for i := 0; i < len(meanVars); i++ {
+	mvs := []*cov.MeanVariances{csMeanVars, crMeanVars, ctMeanVars}
+	for i := 0; i < mvs[0].Size(); i++ {
 		w.WriteString(fmt.Sprintf("%d\t", i))
 		for _, mv := range mvs {
-			w.WriteString(fmt.Sprintf("%g\t%g\t", mv[i].Mean.GetResult(), mv[i].Var.GetResult()))
+			w.WriteString(fmt.Sprintf("%g\t%g\t%d\t", mv.GetMean(i), mv.GetVar(i), mv.GetN(i)))
 		}
-		w.WriteString(fmt.Sprintf("%d\n", mvs[0][i].Mean.GetN()))
+		w.WriteString("\n")
 	}
 }
