@@ -1,5 +1,9 @@
 package calc
 
+import (
+	"github.com/mingzhi/gomath/stat/correlation"
+)
+
 // Calculator contains individual calculators.
 type Calculator struct {
 	MaxL int
@@ -22,7 +26,7 @@ func New(maxl int) *Calculator {
 func (c *Calculator) Increment(xArr, yArr []float64, l int) {
 	if l < c.MaxL {
         // calculate covariance of x and y.
-		cov := NewCovariance()
+		cov := correlation.NewBivariateCovariance(false)
 		for i := range xArr {
 			x, y := xArr[i], yArr[i]
 			cov.Increment(x, y)
@@ -30,7 +34,7 @@ func (c *Calculator) Increment(xArr, yArr []float64, l int) {
         
 		c.Cs.Increment(l, cov.GetResult())
 		c.Ct.AppendAt(l, cov)
-		c.Cr.Increment(l, cov.GetMeanX(), cov.GetMeanY())
+		c.Cr.Increment(l, cov.MeanX(), cov.MeanY())
 
 	}
 }

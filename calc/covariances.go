@@ -1,16 +1,20 @@
 package calc
 
+import (
+	"github.com/mingzhi/gomath/stat/correlation"
+)
+
 
 // Covariances contains an array of Coveriance.
 type Covariances struct {
-	corrs []*Covariance
+	corrs []*correlation.BivariateCovariance
 }
 
 // NewCovariances create a new Covariances
 func NewCovariances(maxl int) *Covariances {
 	cc := Covariances{}
 	for i := 0; i < maxl; i++ {
-		bc := NewCovariance()
+		bc := correlation.NewBivariateCovariance(false)
 		cc.corrs = append(cc.corrs, bc)
 	}
 	return &cc
@@ -28,7 +32,7 @@ func (c *Covariances) Append(c1 *Covariances) {
 	}
 }
 
-func (c *Covariances) AppendAt(i int, c1 *Covariance) {
+func (c *Covariances) AppendAt(i int, c1 *correlation.BivariateCovariance) {
 	c.corrs[i].Append(c1)
 }
 
@@ -44,10 +48,10 @@ func (c *Covariances) GetN(l int) int {
 
 // GetMeanX returns x_bar.
 func (c *Covariances) GetMeanX(l int) float64 {
-	return c.corrs[l].GetMeanX()
+	return c.corrs[l].MeanX()
 }
 
 // GetMeanY returns y_bar.
 func (c *Covariances) GetMeanY(l int) float64 {
-	return c.corrs[l].GetMeanY()
+	return c.corrs[l].MeanY()
 }
