@@ -1,16 +1,19 @@
 package main
 
 import (
+	"log"
 	"os"
 	"runtime"
+	"runtime/pprof"
 
 	"github.com/alecthomas/kingpin"
 )
 
 var (
-	app   = kingpin.New("pcorr", "A command-line application for correlation calculation.")
-	debug = app.Flag("debug", "Enable debug mode.").Bool()
-	ncpu  = app.Flag("ncpu", "number of CPUs for using").Default("1").Int()
+	app     = kingpin.New("pcorr", "A command-line application for correlation calculation.")
+	debug   = app.Flag("debug", "Enable debug mode.").Bool()
+	ncpu    = app.Flag("ncpu", "number of CPUs for using").Default("1").Int()
+	profile = app.Flag("profile", "cpu and heap profile file").Default("").String()
 
 	pileupApp       = app.Command("pileup", "pileup reads")
 	pileupMinBQ     = pileupApp.Flag("min-BQ", "minimum base quality").Short('Q').Default("13").Int()
@@ -54,7 +57,26 @@ var (
 )
 
 func main() {
-	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
+	// Parse flags and arguments.
+	command := kingpin.MustParse(app.Parse(os.Args[1:]))
+
+	// Profile CPU usage.
+	if *profile != "" {
+		cpuprofile := *profile + ".cpu"
+		heapprofile := *profile + ".heap"
+		f1 := createFile(cpuprofile)
+		defer f1.Close()
+		f2 := createFile(heapprofile)
+		defer f2.Close()
+		if *debug {
+			log.Printf("Created CPU profile file: %s\nand Heap profile: %s\n", cpuprofile, heapprofile)
+		}
+		pprof.StartCPUProfile(f1)
+		pprof.WriteHeapProfile(f2)
+		defer pprof.StopCPUProfile()
+	}
+
+	switch command {
 	case pileupApp.FullCommand():
 		pileupCmd := cmdPileup{
 			minBQ:     *pileupMinBQ,
