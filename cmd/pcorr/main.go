@@ -50,10 +50,8 @@ var (
 	crRegionStart   = crApp.Flag("region-start", "region start").Default("0").Int()
 	crRegionEnd     = crApp.Flag("region-end", "region end").Default("0").Int()
 	crChunckSize    = crApp.Flag("chunck-size", "chunck size").Default("10000").Int()
-	crPiFile        = crApp.Arg("pi", "pileup file").Required().String()
-	crFastaFile     = crApp.Arg("fasta", "genome fasta file").Required().String()
-	crGffFile       = crApp.Arg("gff", "GFF file").Required().String()
-	crOutFile       = crApp.Arg("out", "output file").Required().String()
+	crPrefix        = crApp.Arg("prefix", "prefix").Required().String()
+	crGenomeDir     = crApp.Arg("genome-dir", "genome directory").Required().String()
 )
 
 func main() {
@@ -125,10 +123,8 @@ func main() {
 			regionStart:  *crRegionStart,
 			regionEnd:    *crRegionEnd,
 			chunckSize:   *crChunckSize,
-			piFile:       *crPiFile,
-			fastaFile:    *crFastaFile,
-			gffFile:      *crGffFile,
-			outFile:      *crOutFile,
+			genomeDir:    *crGenomeDir,
+			prefix:       *crPrefix,
 		}
 		crCmd.Run()
 		break

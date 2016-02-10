@@ -7,30 +7,42 @@ import (
 	"github.com/mingzhi/ncbiftp/genomes/profiling"
 	"github.com/mingzhi/ncbiftp/taxonomy"
 	"math"
+	"path/filepath"
 )
 
 type cmdCr struct {
-	piFile, fastaFile, gffFile, outFile string
-	codonTableID                        string
-	maxl, pos, minCoverage              int
-	regionStart, regionEnd, chunckSize  int
+	prefix, genomeDir                  string
+	codonTableID                       string
+	maxl, pos, minCoverage             int
+	regionStart, regionEnd, chunckSize int
 }
 
 func (cmd *cmdCr) Run() {
+	// Read pi.
+	piFile := cmd.prefix + ".pi"
+	piChan := readPi(piFile)
+	gPiCC := cmd.separate(piChan)
+	for gPiChan := range gPiCC {
+		cmd.runOne(gPiChan)
+	}
+}
+
+func (cmd *cmdCr) runOne(gPiChan genomePiChan) {
 	// Obtain codon table for identifying four-fold degenerate sites.
 	codonTable := taxonomy.GeneticCodes()[cmd.codonTableID]
 	// Profiling genome using reference sequence and protein feature data.
-	genome := readGenome(cmd.fastaFile)
-	gffs := readGff(cmd.gffFile)
+	ref := gPiChan.genome
+	fnaFile := filepath.Join(cmd.genomeDir, ref+".fna")
+	gffFile := filepath.Join(cmd.genomeDir, ref+".gff")
+	gffs := readGff(gffFile)
+	genome := readGenome(fnaFile)
 	profile := profiling.ProfileGenome(genome, gffs, codonTable)
 	posType := convertPosType(cmd.pos)
-	// Read pi.
-	piChan := readPi(cmd.piFile)
-	piChunckChan := cmd.split(piChan)
+	piChunckChan := cmd.split(gPiChan.piChan)
 	covsChan := cmd.calc(piChunckChan, profile, posType, cmd.maxl)
 	covMVs, xMVs, yMVs := cmd.collect(covsChan)
 
-	cmd.write(covMVs, xMVs, yMVs)
+	cmd.write(ref, covMVs, xMVs, yMVs)
 }
 
 func (cmd *cmdCr) collect(covsChan chan []Covariance) (covMVs, xMVs, yMVs []*meanvar.MeanVar) {
@@ -54,6 +66,36 @@ func (cmd *cmdCr) collect(covsChan chan []Covariance) (covMVs, xMVs, yMVs []*mea
 		}
 	}
 	return
+}
+
+type genomePiChan struct {
+	genome string
+	piChan chan Pi
+}
+
+func (cmd *cmdCr) separate(piChan chan Pi) chan genomePiChan {
+	cc := make(chan genomePiChan)
+	go func() {
+		defer close(cc)
+		c := genomePiChan{}
+		for pi := range piChan {
+			if c.genome == "" {
+				c.genome = pi.Ref
+				c.piChan = make(chan Pi)
+			}
+
+			if c.genome != pi.Ref {
+				cc <- c
+				c = genomePiChan{}
+				c.genome = pi.Ref
+				c.piChan = make(chan Pi)
+			}
+
+			c.piChan <- pi
+		}
+		cc <- c
+	}()
+	return cc
 }
 
 func (cmd *cmdCr) split(piChan chan Pi) chan []Pi {
@@ -132,8 +174,9 @@ func (cmd *cmdCr) calcCr(pis []Pi, profile []profiling.Pos, posType byte, maxl i
 	return
 }
 
-func (cmd *cmdCr) write(covMVs, xMVs, yMVs []*meanvar.MeanVar) {
-	w := createFile(cmd.outFile)
+func (cmd *cmdCr) write(ref string, covMVs, xMVs, yMVs []*meanvar.MeanVar) {
+	outFile := fmt.Sprintf("%s_%s_calc_cr_%d.txt", cmd.prefix, ref, cmd.pos)
+	w := createFile(outFile)
 	defer w.Close()
 
 	for i := 0; i < len(covMVs); i++ {
