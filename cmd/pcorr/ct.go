@@ -15,6 +15,7 @@ import (
 
 type cmdCt struct {
 	pileupFile, fastaFile, gffFile, outFile string
+	pileupFormat                            string
 	codonTableID                            string
 	maxl, pos, minCoverage                  int
 	regionStart, regionEnd, chunckSize      int
@@ -46,7 +47,7 @@ func (cmd *cmdCt) Run() {
 	posType := convertPosType(cmd.pos)
 
 	// Read SNP from pileup input.
-	snpChan := readPileup(f, cmd.regionStart, cmd.regionEnd)
+	snpChan := readPileup(f, cmd.regionStart, cmd.regionEnd, cmd.pileupFormat)
 
 	// Apply filters.
 	filteredSNPChan := cmd.filterSNP(snpChan, profile, posType)
@@ -152,9 +153,9 @@ func (cmd *cmdCt) calcInChunck(snpChan chan *pileup.SNP) *calc.Calculator {
 	for i := 0; i < ncpu; i++ {
 		go func() {
 			covs := calc.New(cmd.maxl)
-            maxN := 10000
-            xArr := make([]float64, maxN)
-            yArr := make([]float64, maxN)
+			maxN := 10000
+			xArr := make([]float64, maxN)
+			yArr := make([]float64, maxN)
 			for arr := range jobChan {
 				cmd.calcSNPArr(arr, covs, xArr, yArr)
 			}

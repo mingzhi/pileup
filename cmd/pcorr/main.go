@@ -24,9 +24,11 @@ var (
 
 	piApp         = app.Command("pi", "calculate pi")
 	piMinBQ       = piApp.Flag("min-BQ", "minimum base quality").Short('Q').Default("13").Int()
+	piMinCoverage = piApp.Flag("min-coverage", "minimum base coverage").Short('c').Default("10").Int()
+	piFormat      = piApp.Flag("pileup-formate", "pileup formate").Short('F').Default("tab").String()
 	piOutFile     = piApp.Flag("output", "output file").Short('o').Default("").String()
-	piRegionStart = piApp.Flag("region-start", "region start").Default("0").Int()
-	piRegionEnd   = piApp.Flag("region-end", "region end").Default("0").Int()
+	piRegionStart = piApp.Flag("region-start", "region start").Short('S').Default("0").Int()
+	piRegionEnd   = piApp.Flag("region-end", "region end").Short('E').Default("0").Int()
 	piPileupFile  = piApp.Arg("pileupfile", "pileup file").Required().String()
 
 	ctApp           = app.Command("ct", "calculate total correlation")
@@ -41,6 +43,7 @@ var (
 	ctFastaFile     = ctApp.Arg("fasta", "genome fasta file").Required().String()
 	ctGffFile       = ctApp.Arg("gff", "GFF file").Required().String()
 	ctOutFile       = ctApp.Arg("out", "output file").Required().String()
+	ctPileupFormat  = ctApp.Flag("pileup-format", "pileup format").Short('F').Default("tab").String()
 
 	crApp           = app.Command("cr", "calculate total correlation")
 	crCondonTableID = crApp.Flag("codon", "condon table ID").Default("11").String()
@@ -87,10 +90,12 @@ func main() {
 		break
 	case piApp.FullCommand():
 		piCmd := cmdPi{
-			outFile:    *piOutFile,
-			minBQ:      *piMinBQ,
-			pileupFile: *piPileupFile,
-			debug:      *debug,
+			outFile:      *piOutFile,
+			minBQ:        *piMinBQ,
+			pileupFile:   *piPileupFile,
+			debug:        *debug,
+			minCoverage:  *piMinCoverage,
+			pileupFormat: *piFormat,
 		}
 		piCmd.regionStart = *piRegionStart
 		piCmd.regionEnd = *piRegionEnd

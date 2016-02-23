@@ -13,6 +13,8 @@ type cmdPi struct {
 	outFile                string
 	minBQ                  int
 	regionStart, regionEnd int
+	minCoverage            int
+	pileupFormat           string
 }
 
 type Pi struct {
@@ -47,7 +49,7 @@ func (p Pi) Pi() (pi float64) {
 func (c *cmdPi) Run() {
 	f := openFile(c.pileupFile)
 	defer f.Close()
-	snpChan := readPileup(f, 0, 0)
+	snpChan := readPileup(f, 0, 0, c.pileupFormat)
 	piChan := make(chan Pi)
 	go func() {
 		defer close(piChan)
@@ -65,6 +67,10 @@ func (c *cmdPi) Run() {
 					}
 					bases, _ = c.filterBases(bases, quals)
 					bases = bytes.ToUpper(bases)
+
+					if len(bases) < c.minCoverage {
+						continue
+					}
 
 					m := make(map[string]int)
 					for _, b := range bases {

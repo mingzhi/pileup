@@ -2,11 +2,11 @@ package pileup
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
-	"errors"
 )
 
 type SNP struct {
@@ -46,7 +46,7 @@ func parse(line string) (*SNP, error) {
 	terms := strings.Split(strings.TrimSpace(line), "\t")
 	s.Ref = terms[0]
 	s.Pos = atoi(terms[1]) - 1
-	s.Base = terms[2][0]
+	s.Base = strings.ToUpper(terms[2])[0]
 	s.Num = atoi(terms[3])
 	if s.Num == 0 {
 		return &s, nil
@@ -60,12 +60,13 @@ func parse(line string) (*SNP, error) {
 	}
 
 	// check bases and quals len.
-    if len(bases) != s.Num {
-        err := errors.New("Decode bases length did not match the indicated number.")
-        return nil, err
-    }
+	if len(bases) != s.Num {
+		err := errors.New("Decode bases length did not match the indicated number.")
+		return nil, err
+	}
+
 	if len(quals) != s.Num {
-        err := errors.New("Decode quals length did not match the indicated number.")
+		err := errors.New("Decode quals length did not match the indicated number.")
 		return nil, err
 	}
 
@@ -74,12 +75,13 @@ func parse(line string) (*SNP, error) {
 			Base: bases[i],
 			Qual: quals[i],
 		}
-
-		if len(QNames) == len(bases) {
-			a.QName = QNames[i]
-		}
-
 		s.Alleles = append(s.Alleles, a)
+	}
+
+	if len(QNames) == len(bases) {
+		for i := range QNames {
+			s.Alleles[i].QName = QNames[i]
+		}
 	}
 
 	return &s, nil
@@ -97,7 +99,7 @@ func decodeReadBases(s string, ref byte) []byte {
 		deletedPositions := make(map[int]bool)
 		for i := 0; i < len(insertNumbers); i++ {
 			start := insertIndex[i][0]
-            digit := insertNumbers[i][1:]
+			digit := insertNumbers[i][1:]
 			n := atoi(digit)
 			for j := start; j < start+len(digit)+n+1; j++ {
 				deletedPositions[j] = true
