@@ -25,9 +25,11 @@ type Pi struct {
 func (p Pi) Pi() (pi float64) {
 	total := 0
 	nums := []int{}
-	for _, n := range p.Alleles {
-		total += n
-		nums = append(nums, n)
+	for c, n := range p.Alleles {
+		if isATGC(c[0]) {
+			total += n
+			nums = append(nums, n)
+		}
 	}
 
 	cross := 0
