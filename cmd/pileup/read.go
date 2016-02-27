@@ -24,6 +24,7 @@ type Pi struct {
 	PatricId string
 	Position int
 	Pi       float64
+	Coverage int
 }
 
 type extPi struct {
@@ -132,6 +133,7 @@ func calcPi(snpChan chan *pileup.SNP, db *bolt.DB, minDepth int) chan *extPi {
 						PatricId: f.PatricID,
 						Position: snp.Position,
 						Pi:       snp.Pi(),
+						Coverage: len(snp.Bases),
 					}
 					c <- &extPi{pi: pi, start: f.Start, end: f.End}
 				}

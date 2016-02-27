@@ -38,6 +38,8 @@ func main() {
 		readcmd := cmdRead{
 			pileupFile: *pileupFile,
 			dbfile:     *readOut,
+			minCover:   *readMinCover,
+			minDepth:   *readMinDepth,
 		}
 		readcmd.run()
 		break
