@@ -75,8 +75,8 @@ func groupSNPs(snpChan chan *pileup.SNP, db *bolt.DB, minDepth int, minCover flo
 
 		for snp := range snpChan {
 			// update genome features.
-			if snp.Reference != currentGenome.Reference {
-				reference := cleanAccession(snp.Reference)
+			reference := cleanAccession(snp.Reference)
+			if reference != currentGenome.Reference {
 				currentGenome = queryGenome(db, reference)
 			}
 
