@@ -18,7 +18,7 @@ var (
 	readApp      = app.Command("read", "read samtools mpileup results.")
 	pileupFile   = readApp.Arg("pileup_file", "pileup file.").Required().String()
 	readOut      = readApp.Arg("db", "db file.").Required().String()
-	readMinDepth = readApp.Flag("min_depth", "min depth").Default("10").Int()
+	readMinDepth = readApp.Flag("min_depth", "min depth").Default("5").Int()
 	readMinCover = readApp.Flag("min_coverage", "min coverage").Default("0.8").Float64()
 )
 
@@ -28,7 +28,7 @@ func main() {
 
 	switch command {
 	case featApp.FullCommand():
-		featcmd := featCmd{
+		featcmd := cmdFeat{
 			out: *featOut,
 			dir: *featDir,
 		}

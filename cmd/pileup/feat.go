@@ -13,38 +13,14 @@ import (
 	"strings"
 )
 
-type Feature struct {
-	TaxID       string
-	Species     string
-	Genome      string
-	Annotation  string
-	Type        string
-	PatricID    string
-	LocusTag    string
-	AltLocusTag string
-	Uniprotkb   string
-	Start       int
-	End         int
-	Strand      string
-	Length      int
-	Gene        string
-	Product     string
-	FigfamID    string
-	PlfamID     string
-	PgfamID     string
-	Go          string
-	Ec          string
-	Pathway     string
-}
-
-type featCmd struct {
+type cmdFeat struct {
 	dir string
 	out string
 }
 
 type dbfunc func(tx *bolt.Tx) error
 
-func (f *featCmd) run() {
+func (f *cmdFeat) run() {
 	db, err := bolt.Open(f.out, 0600, nil)
 	if err != nil {
 		log.Fatal(err)
@@ -125,7 +101,7 @@ func loadFeatures(db *bolt.DB, features []Feature) {
 }
 
 // walk returns a list of feature files.
-func (f *featCmd) walk() []string {
+func (f *cmdFeat) walk() []string {
 	featureFileList := []string{}
 	fileInfoList := readDir(f.dir)
 	for _, fi := range fileInfoList {

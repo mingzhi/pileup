@@ -20,36 +20,39 @@ type cmdRead struct {
 	db *bolt.DB
 }
 
-type Pi struct {
-	PatricId string
-	Position int
-	Pi       float64
-	Coverage int
+// Gene contains a group of SNP and its feature.
+type Gene struct {
+	*Feature
+	SNPs []*pileup.SNP
 }
 
-type extPi struct {
-	pi         Pi
-	start, end int
+// Genome is a group of features.
+type Genome struct {
+	Reference string
+	Features  []*Feature
 }
 
 func (c *cmdRead) run() {
 	c.openDB()
-	// open pileup file
+	// open pileup file and read SNP.
 	snpChan := readPileup(c.pileupFile)
-	piChan := calcPi(snpChan, c.db, c.minDepth)
-	c.db.Update(createBucket("pi"))
-	gc := collectPi(piChan, c.minCover)
-	loadPi(gc, c.db)
+	// group SNPs into genes.
+	geneChan := groupSNPs(snpChan, c.db, c.minDepth, c.minCover)
+	// create gene bucket.
+	c.db.Update(createBucket("gene"))
+	// load gene into the bucket.
+	loadGenes(geneChan, c.db, "gene")
 
 	// check number of written records.
 	c.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte("pi"))
+		b := tx.Bucket([]byte("gene"))
 		s := b.Stats()
 		log.Printf("Wrote %d records\n", s.KeyN)
 		return nil
 	})
 }
 
+// open a bolt db.
 func (c *cmdRead) openDB() {
 	if _, err := os.Stat(c.dbfile); os.IsNotExist(err) {
 		log.Fatalf("can not find feature db: %s\n", c.dbfile)
@@ -61,157 +64,137 @@ func (c *cmdRead) openDB() {
 	c.db = db
 }
 
-type Features []*Feature
-
-func (s Features) Len() int      { return len(s) }
-func (s Features) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
-
-type ByStart struct{ Features }
-type ByEnd struct{ Features }
-
-func (s ByStart) Less(i, j int) bool { return s.Features[i].Start < s.Features[j].Start }
-func (s ByEnd) Less(i, j int) bool   { return s.Features[i].End < s.Features[j].End }
-
-func calcPi(snpChan chan *pileup.SNP, db *bolt.DB, minDepth int) chan *extPi {
-	c := make(chan *extPi, 10)
+// group SNPs into genes.
+func groupSNPs(snpChan chan *pileup.SNP, db *bolt.DB, minDepth int, minCover float64) chan *Gene {
+	c := make(chan *Gene, 100)
 	go func() {
 		defer close(c)
-		currentGenome := ""
-		features := []*Feature{}
+		currentGenome := Genome{}
+		var currentGene *Gene
+		var toUpdate bool
+
 		for snp := range snpChan {
-			genome := snp.Reference
-			if genome != currentGenome {
-				features = []*Feature{}
-				currentGenome = genome
-				acc := genome
-				if strings.Contains(genome, "|") {
-					acc = strings.Split(genome, "|")[1]
-				}
-				acc = strings.Split(acc, ".")[0]
-				fn := func(tx *bolt.Tx) error {
-					b := tx.Bucket([]byte("genome"))
-					v := b.Get([]byte(acc))
-					if len(v) == 0 {
-						return nil
-					}
-					ids := []string{}
-					err := msgpack.Unmarshal(v, &ids)
-					if err != nil {
-						log.Panicln(err)
-					}
-					b = tx.Bucket([]byte("feature"))
-					for _, id := range ids {
-						if id == "" {
-							continue
-						}
-						v := b.Get([]byte(id))
-						f := Feature{}
-						if err := msgpack.Unmarshal(v, &f); err != nil {
-							log.Panicln(err)
-						}
-						if f.Type == "CDS" {
-							features = append(features, &f)
-						}
-					}
-
-					return nil
-				}
-
-				db.View(fn)
-				if len(features) > 0 {
-					sort.Sort(ByEnd{features})
-				}
-				if *debug {
-					log.Println(acc)
-				}
+			// update genome features.
+			if snp.Reference != currentGenome.Reference {
+				reference := cleanAccession(snp.Reference)
+				currentGenome = queryGenome(db, reference)
 			}
 
 			if len(snp.Bases) >= minDepth {
-				f := findFeature(snp.Position, features)
-				if f != nil {
-					pi := Pi{
-						PatricId: f.PatricID,
-						Position: snp.Position,
-						Pi:       snp.Pi(),
-						Coverage: len(snp.Bases),
+				toUpdate = false
+				if currentGene == nil {
+					toUpdate = true
+				} else {
+					outBound := snp.Position < currentGene.Start || snp.Position > currentGene.End
+					if outBound {
+						toUpdate = true
+						geneLen := currentGene.End - currentGene.Start + 1
+						if float64(len(currentGene.SNPs))/float64(geneLen) >= minCover {
+							c <- currentGene
+						}
 					}
-					c <- &extPi{pi: pi, start: f.Start, end: f.End}
+				}
+
+				if toUpdate {
+					f := findFeature(snp.Position, currentGenome.Features)
+					if f != nil {
+						currentGene = &Gene{}
+						currentGene.Feature = f
+					} else {
+						currentGene = nil
+					}
+				}
+
+				if currentGene != nil {
+					currentGene.SNPs = append(currentGene.SNPs, snp)
 				}
 			}
 		}
 	}()
-
 	return c
 }
 
-func createPiBucket(db *bolt.DB) {
-	db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucket([]byte("pi"))
+// query genome from bolt db.
+func queryGenome(db *bolt.DB, reference string) Genome {
+	features := []*Feature{}
+	fn := func(tx *bolt.Tx) error {
+		// first, we query genome bucket to
+		// obtain a list of gene IDs.
+		b := tx.Bucket([]byte("genome"))
+		v := b.Get([]byte(reference))
+		// check if genome is found.
+		if len(v) == 0 {
+			return nil
+		}
+		// unpack gene IDs.
+		geneIDs := []string{}
+		err := msgpack.Unmarshal(v, &geneIDs)
 		if err != nil {
-			if err == bolt.ErrBucketExists {
-				tx.DeleteBucket([]byte("pi"))
-				tx.CreateBucket([]byte("pi"))
-			} else {
-				log.Panicln(err)
+			log.Panicln(err)
+		}
+
+		// now, we try obtain gene feature informations
+		// from feature bucket.
+		b = tx.Bucket([]byte("feature"))
+		for _, id := range geneIDs {
+			v := b.Get([]byte(id))
+			if len(v) >= 0 {
+				f := Feature{}
+				if err := msgpack.Unmarshal(v, &f); err != nil {
+					log.Panicln(err)
+				}
+				if f.Type == "CDS" || strings.Contains(f.Type, "RNA") {
+					features = append(features, &f)
+				}
 			}
 		}
 
 		return nil
-	})
+	}
+
+	db.View(fn)
+
+	// sort features.
+	if len(features) > 0 {
+		sort.Sort(ByEnd{features})
+	}
+
+	return Genome{Reference: reference, Features: features}
 }
 
-type gPiCol struct {
-	gene string
-	col  []Pi
+func cleanAccession(reference string) string {
+	if strings.Contains(reference, "|") {
+		reference = strings.Split(reference, "|")[1]
+	}
+	return strings.Split(reference, ".")[0]
 }
 
-func collectPi(piChan chan *extPi, minCover float64) chan gPiCol {
-	c := make(chan gPiCol, 100)
-	go func() {
-		defer close(c)
-		geneId := ""
-		buf := []Pi{}
-		geneLen := 0
-		for pi := range piChan {
-			if pi.pi.PatricId != geneId {
-				if float64(len(buf))/float64(geneLen) >= minCover {
-					c <- gPiCol{gene: geneId, col: buf}
-				}
-				geneId = pi.pi.PatricId
-				buf = []Pi{}
-			}
-			buf = append(buf, pi.pi)
-			geneLen = pi.end - pi.start + 1
-		}
-	}()
-	return c
-}
-
-func loadPi(c chan gPiCol, db *bolt.DB) {
-	buffer := []gPiCol{}
-	for gc := range c {
-		if len(buffer) > 1000 {
-			db.Update(func(tx *bolt.Tx) error {
-				for _, gc := range buffer {
-					geneId := gc.gene
-					buf := gc.col
-					key := []byte(geneId)
-					value, err := msgpack.Marshal(buf)
+// load genes into db.
+func loadGenes(geneChan chan *Gene, db *bolt.DB, bucketName string) {
+	bufferSize := 1000
+	buffer := []*Gene{}
+	for gene := range geneChan {
+		if len(buffer) > bufferSize {
+			fn := func(tx *bolt.Tx) error {
+				for _, g := range buffer {
+					key := []byte(g.PatricID)
+					value, err := msgpack.Marshal(g.SNPs)
 					if err != nil {
 						log.Panicln(err)
 					}
-					if err := tx.Bucket([]byte("pi")).Put(key, value); err != nil {
+
+					err = tx.Bucket([]byte(bucketName)).Put(key, value)
+					if err != nil {
 						log.Panicln(err)
 					}
 				}
-
 				return nil
-			})
-			buffer = []gPiCol{}
+			}
+			db.Update(fn)
+			buffer = []*Gene{}
 		}
-		buffer = append(buffer, gc)
+		buffer = append(buffer, gene)
 	}
-
 }
 
 func findFeature(pos int, features []*Feature) *Feature {
