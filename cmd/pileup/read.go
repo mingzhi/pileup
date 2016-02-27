@@ -138,7 +138,7 @@ func queryGenome(db *bolt.DB, reference string) Genome {
 		b = tx.Bucket([]byte("feature"))
 		for _, id := range geneIDs {
 			v := b.Get([]byte(id))
-			if len(v) >= 0 {
+			if len(v) > 0 {
 				f := Feature{}
 				if err := msgpack.Unmarshal(v, &f); err != nil {
 					log.Panicln(err)
