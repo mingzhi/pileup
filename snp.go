@@ -46,7 +46,7 @@ func parse(line string) (*SNP, error) {
 	terms := strings.Split(strings.TrimSpace(line), "\t")
 	s.Ref = terms[0]
 	s.Pos = atoi(terms[1]) - 1
-	s.Base = terms[2][0]
+	s.Base = strings.ToUpper(terms[2])[0]
 	s.Num = atoi(terms[3])
 	if s.Num == 0 {
 		return &s, nil

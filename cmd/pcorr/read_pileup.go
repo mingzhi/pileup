@@ -5,50 +5,46 @@ import (
 	"io"
 	"log"
 	"os"
-	"strings"
 
 	"github.com/mingzhi/pileup"
 )
 
-func readPileup(f *os.File, regionStart, regionEnd int) <-chan *pileup.SNP {
+func readPileup(f *os.File, regionStart, regionEnd int, fileFormate string) <-chan *pileup.SNP {
 	c := make(chan *pileup.SNP)
 	go func() {
 		defer close(c)
-		// check format.
-		fields := strings.Split(f.Name(), ".")
-		format := fields[len(fields)-1]
 		var snpChan <-chan *pileup.SNP
 		done := make(chan struct{})
 		defer close(done)
-		switch format {
-		case "pileup":
-			snpChan = readPileup1(f, done)
+		switch fileFormate {
+		case "json":
+			snpChan = readPileupJSON(f, done)
 			break
-		case "mpileup":
-			snpChan = readPileup2(f, done)
+		case "tab":
+			snpChan = readPileupTab(f, done)
 			break
 		default:
-			log.Fatalf("Can not recognize the pileup format: %s.\nFile should be ended with .pileup or .mpileup\n", format)
+			log.Fatalf("Can not recognize the pileup format: %s\n", fileFormate)
 		}
-        
-        for s := range snpChan {
-            if regionEnd > 0 {
-                if s.Pos >= regionEnd {
-                    done <- struct{}{}
-                } else if s.Pos >= regionStart {
-                    c <- s
-                }
-            } else {
-                if s.Pos >= regionStart {
-                    c <- s
-                }
-            }
-        }
+
+		for s := range snpChan {
+			if regionEnd > 0 {
+				if s.Pos >= regionEnd {
+					done <- struct{}{}
+				} else if s.Pos >= regionStart {
+					c <- s
+				}
+			} else {
+				if s.Pos >= regionStart {
+					c <- s
+				}
+			}
+		}
 	}()
 	return c
 }
 
-func readPileup1(f *os.File, done <-chan struct{}) <-chan *pileup.SNP {
+func readPileupJSON(f *os.File, done <-chan struct{}) <-chan *pileup.SNP {
 	c := make(chan *pileup.SNP)
 	go func() {
 		defer close(c)
@@ -75,7 +71,7 @@ func readPileup1(f *os.File, done <-chan struct{}) <-chan *pileup.SNP {
 	return c
 }
 
-func readPileup2(f *os.File, done <-chan struct{}) <-chan *pileup.SNP {
+func readPileupTab(f *os.File, done <-chan struct{}) <-chan *pileup.SNP {
 	c := make(chan *pileup.SNP)
 	go func() {
 		defer close(c)
@@ -93,7 +89,7 @@ func readPileup2(f *os.File, done <-chan struct{}) <-chan *pileup.SNP {
 				}
 				break
 			}
-            
+
 			select {
 			case c <- s:
 			case <-done:
