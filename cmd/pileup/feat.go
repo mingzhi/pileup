@@ -45,9 +45,6 @@ type featCmd struct {
 type dbfunc func(tx *bolt.Tx) error
 
 func (f *featCmd) run() {
-	if _, err := os.Stat(f.out); err == nil {
-		os.Remove(f.out)
-	}
 	db, err := bolt.Open(f.out, 0600, nil)
 	if err != nil {
 		log.Fatal(err)
@@ -73,7 +70,12 @@ func createBucket(bucketName string) dbfunc {
 	f := func(tx *bolt.Tx) error {
 		_, err := tx.CreateBucket([]byte(bucketName))
 		if err != nil {
-			return err
+			if err == bolt.ErrBucketExists {
+				tx.DeleteBucket([]byte(bucketName))
+				tx.CreateBucket([]byte(bucketName))
+			} else {
+				log.Panicln(err)
+			}
 		}
 		return nil
 	}
