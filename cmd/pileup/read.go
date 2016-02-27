@@ -171,7 +171,7 @@ func cleanAccession(reference string) string {
 
 // load genes into db.
 func loadGenes(geneChan chan *Gene, db *bolt.DB, bucketName string) {
-	bufferSize := 1000
+	bufferSize := 100
 	buffer := []*Gene{}
 	for gene := range geneChan {
 		if len(buffer) > bufferSize {
