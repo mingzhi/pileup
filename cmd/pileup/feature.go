@@ -24,6 +24,14 @@ type Feature struct {
 	Pathway     string
 }
 
+func (f Feature) IsComplementaryStrand() bool {
+	if f.Strand == "-" {
+		return true
+	}
+
+	return false
+}
+
 type Features []*Feature
 
 func (s Features) Len() int      { return len(s) }

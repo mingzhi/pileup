@@ -1,0 +1,52 @@
+package main
+
+import (
+	"github.com/bmatsuo/lmdb-go/lmdb"
+	"log"
+)
+
+func createLMDBEnv(path string) *lmdb.Env {
+	env, err := lmdb.NewEnv()
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	err = env.SetMaxDBs(10)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	err = env.SetMapSize(1 << 32)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	err = env.Open(path, 0, 0644)
+	if err != nil {
+		log.Panicln(err)
+	}
+
+	return env
+}
+
+func createDBI(env *lmdb.Env, name string) {
+	fn := func(txn *lmdb.Txn) error {
+		var dbi lmdb.DBI
+		var err error
+		var del bool = false
+
+		if dbi, err = txn.CreateDBI(name); err != nil {
+			return err
+		}
+
+		if err = txn.Drop(dbi, del); err != nil {
+			return err
+		}
+
+		return nil
+	}
+	err := env.Update(fn)
+	if err != nil {
+		log.Fatalln(err)
+	}
+}

@@ -2,7 +2,8 @@ package main
 
 import (
 	"bufio"
-	"github.com/boltdb/bolt"
+	"github.com/bmatsuo/lmdb-go/lmdb"
+	"github.com/mingzhi/biogo/seq"
 	"gopkg.in/vmihailenco/msgpack.v2"
 	"io"
 	"io/ioutil"
@@ -16,68 +17,53 @@ import (
 type cmdFeat struct {
 	dir string
 	out string
+
+	env *lmdb.Env
 }
 
-type dbfunc func(tx *bolt.Tx) error
+func (c *cmdFeat) run() {
+	// create an environment and make sure it is eventually closed.
+	c.env = createLMDBEnv(c.out)
+	defer c.env.Close()
 
-func (f *cmdFeat) run() {
-	db, err := bolt.Open(f.out, 0600, nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer db.Close()
+	createDBI(c.env, "feature")
+	createDBI(c.env, "genome")
 
-	if err := db.Update(createBucket("feature")); err != nil {
-		log.Panicln(err)
-	}
-
-	if err := db.Update(createBucket("genome")); err != nil {
-		log.Panicln(err)
-	}
-
-	featureFileList := f.walk()
+	featureFileList := c.walk(".PATRIC.features.tab")
 	for _, featureFile := range featureFileList {
 		features := readFeatures(featureFile)
-		loadFeatures(db, features)
+		c.loadFeatures(features)
 	}
 }
 
-func createBucket(bucketName string) dbfunc {
-	f := func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucket([]byte(bucketName))
-		if err != nil {
-			if err == bolt.ErrBucketExists {
-				tx.DeleteBucket([]byte(bucketName))
-				tx.CreateBucket([]byte(bucketName))
-			} else {
-				log.Panicln(err)
-			}
-		}
-		return nil
-	}
-	return f
-}
-
-func loadFeatures(db *bolt.DB, features []Feature) {
-	err := db.Update(func(tx *bolt.Tx) error {
+func (c *cmdFeat) loadFeatures(features []Feature) {
+	err := c.env.Update(func(txn *lmdb.Txn) error {
 		genomeGeneMap := make(map[string][]string)
 		for _, f := range features {
 			genomeGeneMap[f.Genome] = append(genomeGeneMap[f.Genome], f.PatricID)
 		}
 
-		b := tx.Bucket([]byte("genome"))
+		var dbi lmdb.DBI
+		var err error
+		dbi, err = txn.OpenDBI("genome", 0)
+		if err != nil {
+			return err
+		}
 		for genome, ids := range genomeGeneMap {
 			key := []byte(genome)
 			value, err := msgpack.Marshal(ids)
 			if err != nil {
 				return err
 			}
-			if err := b.Put(key, value); err != nil {
+			if err := txn.Put(dbi, key, value, 0); err != nil {
 				return err
 			}
 		}
 
-		b = tx.Bucket([]byte("feature"))
+		dbi, err = txn.OpenDBI("feature", 0)
+		if err != nil {
+			return err
+		}
 		for _, f := range features {
 			if f.PatricID == "" {
 				continue
@@ -87,7 +73,7 @@ func loadFeatures(db *bolt.DB, features []Feature) {
 			if err != nil {
 				return err
 			}
-			if err := b.Put(key, value); err != nil {
+			if err := txn.Put(dbi, key, value, 0); err != nil {
 				return err
 			}
 		}
@@ -96,12 +82,12 @@ func loadFeatures(db *bolt.DB, features []Feature) {
 	})
 
 	if err != nil {
-		log.Panicln(err)
+		log.Fatalln(err)
 	}
 }
 
 // walk returns a list of feature files.
-func (f *cmdFeat) walk() []string {
+func (f *cmdFeat) walk(pattern string) []string {
 	featureFileList := []string{}
 	fileInfoList := readDir(f.dir)
 	for _, fi := range fileInfoList {
@@ -109,7 +95,7 @@ func (f *cmdFeat) walk() []string {
 			dirPath := filepath.Join(f.dir, fi.Name())
 			filelist := readDir(dirPath)
 			for _, f := range filelist {
-				if strings.Contains(f.Name(), ".PATRIC.features.tab") {
+				if strings.Contains(f.Name(), pattern) {
 					filePath := filepath.Join(dirPath, f.Name())
 					featureFileList = append(featureFileList, filePath)
 				}
@@ -118,6 +104,25 @@ func (f *cmdFeat) walk() []string {
 	}
 
 	return featureFileList
+}
+
+func readFna(filename string, getAcc func(string) string) (accessions []string, sequences [][]byte) {
+	f, err := os.Open(filename)
+	if err != nil {
+		log.Panicln(err)
+	}
+	defer f.Close()
+	fastaReader := seq.NewFastaReader(f)
+	ss, err := fastaReader.ReadAll()
+	if err != nil {
+		log.Panicln(err)
+	}
+	for _, a := range ss {
+		id := getAcc(a.Id)
+		accessions = append(accessions, id)
+		sequences = append(sequences, a.Seq)
+	}
+	return
 }
 
 func readFeatures(filename string) []Feature {
@@ -201,4 +206,19 @@ func atoi(s string) int {
 		log.Panicln(err)
 	}
 	return i
+}
+
+func getID(id string) string {
+	terms := strings.Split(id, "|")
+	if strings.Contains(id, "fig|") {
+		return strings.Join(terms[:2], "|")
+	} else if strings.Contains(id, "accn|") {
+		return terms[1]
+	} else {
+		if *debug {
+			log.Println(id)
+		}
+		return id
+	}
+
 }

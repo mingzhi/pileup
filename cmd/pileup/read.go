@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/boltdb/bolt"
+	"github.com/bmatsuo/lmdb-go/lmdb"
 	"github.com/mingzhi/biogo/pileup"
 	"gopkg.in/vmihailenco/msgpack.v2"
 	"io"
@@ -16,8 +16,10 @@ type cmdRead struct {
 	dbfile     string
 	minDepth   int
 	minCover   float64
+	featureDB  string
 
-	db *bolt.DB
+	env        *lmdb.Env
+	featureEnv *lmdb.Env
 }
 
 // Gene contains a group of SNP and its feature.
@@ -33,42 +35,52 @@ type Genome struct {
 }
 
 func (c *cmdRead) run() {
-	c.openDB()
+	// create environment and dbi.
+	c.env = createLMDBEnv(c.dbfile)
+	defer c.env.Close()
+
+	c.featureEnv = createLMDBEnv(c.featureDB)
+	defer c.featureEnv.Close()
+
+	createDBI(c.env, "gene")
 	// open pileup file and read SNP.
 	snpChan := readPileup(c.pileupFile)
 	// group SNPs into genes.
-	geneChan := groupSNPs(snpChan, c.db, c.minDepth, c.minCover)
-	// create gene bucket.
-	c.db.Update(createBucket("gene"))
-	// load gene into the bucket.
-	loadGenes(geneChan, c.db, "gene")
+	geneChan := c.groupSNPs(snpChan)
+	c.loadGenes(geneChan)
 
-	// check number of written records.
-	c.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte("gene"))
-		s := b.Stats()
-		log.Printf("Wrote %d records\n", s.KeyN)
+	err := c.env.View(func(tx *lmdb.Txn) error {
+		dbi, err := tx.OpenDBI("gene", 0)
+		if err != nil {
+			return err
+		}
+		cur, err := tx.OpenCursor(dbi)
+		if err != nil {
+			return err
+		}
+		count := 0
+		for {
+			_, _, err := cur.Get(nil, nil, lmdb.Next)
+			if lmdb.IsNotFound(err) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			count++
+		}
+		log.Printf("Total gene: %d\n", count)
 		return nil
 	})
-}
-
-// open a bolt db.
-func (c *cmdRead) openDB() {
-	if _, err := os.Stat(c.dbfile); os.IsNotExist(err) {
-		log.Fatalf("can not find feature db: %s\n", c.dbfile)
-	}
-	db, err := bolt.Open(c.dbfile, 0600, nil)
 	if err != nil {
-		log.Fatal(err)
+		log.Panicln(err)
 	}
-	c.db = db
 }
 
-// group SNPs into genes.
-func groupSNPs(snpChan chan *pileup.SNP, db *bolt.DB, minDepth int, minCover float64) chan *Gene {
-	c := make(chan *Gene, 100)
+func (c *cmdRead) groupSNPs(snpChan chan *pileup.SNP) chan *Gene {
+	ch := make(chan *Gene, 100)
 	go func() {
-		defer close(c)
+		defer close(ch)
 		currentGenome := Genome{}
 		var currentGene *Gene
 		var toUpdate bool
@@ -77,10 +89,10 @@ func groupSNPs(snpChan chan *pileup.SNP, db *bolt.DB, minDepth int, minCover flo
 			// update genome features.
 			reference := cleanAccession(snp.Reference)
 			if reference != currentGenome.Reference {
-				currentGenome = queryGenome(db, reference)
+				currentGenome = c.queryGenome(reference)
 			}
 
-			if len(snp.Bases) >= minDepth {
+			if len(snp.Bases) >= c.minDepth {
 				toUpdate = false
 				if currentGene == nil {
 					toUpdate = true
@@ -89,8 +101,8 @@ func groupSNPs(snpChan chan *pileup.SNP, db *bolt.DB, minDepth int, minCover flo
 					if outBound {
 						toUpdate = true
 						geneLen := currentGene.End - currentGene.Start + 1
-						if float64(len(currentGene.SNPs))/float64(geneLen) >= minCover {
-							c <- currentGene
+						if float64(len(currentGene.SNPs))/float64(geneLen) >= c.minCover {
+							ch <- currentGene
 						}
 					}
 				}
@@ -111,33 +123,41 @@ func groupSNPs(snpChan chan *pileup.SNP, db *bolt.DB, minDepth int, minCover flo
 			}
 		}
 	}()
-	return c
+	return ch
 }
 
-// query genome from bolt db.
-func queryGenome(db *bolt.DB, reference string) Genome {
+func (c *cmdRead) queryGenome(reference string) Genome {
 	features := []*Feature{}
-	fn := func(tx *bolt.Tx) error {
+	fn := func(tx *lmdb.Txn) error {
 		// first, we query genome bucket to
 		// obtain a list of gene IDs.
-		b := tx.Bucket([]byte("genome"))
-		v := b.Get([]byte(reference))
-		// check if genome is found.
-		if len(v) == 0 {
-			return nil
+		dbi, err := tx.OpenDBI("genome", 0)
+		if err != nil {
+			return err
+		}
+		v, err := tx.Get(dbi, []byte(reference))
+		if err != nil {
+			log.Panicln(err)
+			return err
 		}
 		// unpack gene IDs.
 		geneIDs := []string{}
-		err := msgpack.Unmarshal(v, &geneIDs)
+		err = msgpack.Unmarshal(v, &geneIDs)
 		if err != nil {
 			log.Panicln(err)
 		}
 
 		// now, we try obtain gene feature informations
 		// from feature bucket.
-		b = tx.Bucket([]byte("feature"))
+		dbi, err = tx.OpenDBI("feature", 0)
 		for _, id := range geneIDs {
-			v := b.Get([]byte(id))
+			if len(id) == 0 {
+				continue
+			}
+			v, err := tx.Get(dbi, []byte(id))
+			if err != nil {
+				return err
+			}
 			if len(v) > 0 {
 				f := Feature{}
 				if err := msgpack.Unmarshal(v, &f); err != nil {
@@ -152,7 +172,10 @@ func queryGenome(db *bolt.DB, reference string) Genome {
 		return nil
 	}
 
-	db.View(fn)
+	err := c.featureEnv.View(fn)
+	if err != nil {
+		log.Panicln(err)
+	}
 
 	// sort features.
 	if len(features) > 0 {
@@ -169,31 +192,41 @@ func cleanAccession(reference string) string {
 	return strings.Split(reference, ".")[0]
 }
 
-// load genes into db.
-func loadGenes(geneChan chan *Gene, db *bolt.DB, bucketName string) {
+func (c *cmdRead) loadGenes(geneChan chan *Gene) {
 	bufferSize := 100
 	buffer := []*Gene{}
 	for gene := range geneChan {
 		if len(buffer) > bufferSize {
-			fn := func(tx *bolt.Tx) error {
-				for _, g := range buffer {
-					key := []byte(g.PatricID)
-					value, err := msgpack.Marshal(g.SNPs)
-					if err != nil {
-						log.Panicln(err)
-					}
-
-					err = tx.Bucket([]byte(bucketName)).Put(key, value)
-					if err != nil {
-						log.Panicln(err)
-					}
-				}
-				return nil
-			}
-			db.Update(fn)
+			c.loadBuffer(buffer)
 			buffer = []*Gene{}
 		}
 		buffer = append(buffer, gene)
+	}
+	c.loadBuffer(buffer)
+}
+
+func (c *cmdRead) loadBuffer(buffer []*Gene) {
+	fn := func(txn *lmdb.Txn) error {
+		dbi, err := txn.OpenDBI("gene", 0)
+		if err != nil {
+			return err
+		}
+		for _, g := range buffer {
+			key := []byte(g.PatricID)
+			value, err := msgpack.Marshal(g.SNPs)
+			if err != nil {
+				return err
+			}
+
+			if err := txn.Put(dbi, key, value, 0); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	err := c.env.Update(fn)
+	if err != nil {
+		log.Panicln(err)
 	}
 }
 
