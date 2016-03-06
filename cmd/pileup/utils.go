@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/bmatsuo/lmdb-go/lmdb"
+	"github.com/mingzhi/gomath/stat/desc/meanvar"
 	"log"
 )
 
@@ -49,4 +50,12 @@ func createDBI(env *lmdb.Env, name string) {
 	if err != nil {
 		log.Fatalln(err)
 	}
+}
+
+func newMeanVars(size int) []*meanvar.MeanVar {
+	mvs := make([]*meanvar.MeanVar, size)
+	for i := range mvs {
+		mvs[i] = meanvar.New()
+	}
+	return mvs
 }

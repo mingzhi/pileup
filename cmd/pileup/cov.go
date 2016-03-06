@@ -15,6 +15,7 @@ type cmdCr struct {
 	dbfile        string
 	codonID       string
 	featureDbPath string
+	minDepth      int
 
 	db *bolt.DB
 	gc *taxonomy.GeneticCode
@@ -68,7 +69,6 @@ func (c *cmdCr) readSNPs() chan SNPArr {
 			}
 
 			ch <- SNPArr{Key: k, Arr: arr}
-			log.Println(string(k))
 		}
 	}
 
@@ -106,6 +106,9 @@ func (c *cmdCr) calculateCr(in chan SNPArr) chan CovRes {
 			}
 
 			for _, s := range snpArr.Arr {
+				if len(s.Bases) < c.minDepth {
+					continue
+				}
 				pos := s.Position - feature.Start
 				if feature.IsComplementaryStrand() {
 					pos = seqLen - 1 - pos
@@ -195,11 +198,9 @@ func xcross(a []float64) []float64 {
 }
 
 func cov(x, y []float64) float64 {
-	xy, xbar, ybar := 0.0, 0.0, 0.0
+	xy := 0.0
 	for i := range x {
 		xy += x[i] * y[i]
-		xbar += x[i]
-		ybar += y[i]
 	}
 	n := float64(len(x))
 	if n < 100 {
