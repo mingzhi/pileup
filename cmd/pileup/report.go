@@ -11,14 +11,14 @@ import (
 	"strings"
 )
 
-type cmdReport2 struct {
+type cmdReport struct {
 	prefix    string
 	featureDB *lmdb.Env
 	resultsDB *lmdb.Env
 	maxl      int
 }
 
-func (c *cmdReport2) run() {
+func (c *cmdReport) run() {
 	crChan := c.getCr()
 	grChan := c.getFeature(crChan)
 	c.groupGr(grChan)
@@ -26,7 +26,7 @@ func (c *cmdReport2) run() {
 
 // Iterate all cr results,
 // output a channel of CovRes.
-func (c *cmdReport2) getCr() chan CovRes {
+func (c *cmdReport) getCr() chan CovRes {
 	ch := make(chan CovRes)
 	fn := func(txn *lmdb.Txn) error {
 		dbi, err := txn.OpenDBI("cr", 0)
@@ -78,7 +78,7 @@ type GeneRes struct {
 	Values  []float64
 }
 
-func (c *cmdReport2) getFeature(crChan chan CovRes) chan GeneRes {
+func (c *cmdReport) getFeature(crChan chan CovRes) chan GeneRes {
 	ch := make(chan GeneRes)
 	fn := func(txn *lmdb.Txn) error {
 		dbi, err := txn.OpenDBI("feature", 0)
@@ -110,10 +110,18 @@ func (c *cmdReport2) getFeature(crChan chan CovRes) chan GeneRes {
 	return ch
 }
 
-func (c *cmdReport2) groupGr(grChan chan GeneRes) {
+func (c *cmdReport) groupGr(grChan chan GeneRes) {
+	w, err := os.Create(c.prefix + ".detectable.gene.csv")
+	if err != nil {
+		log.Fatalln(err)
+	}
+	defer w.Close()
+	w.WriteString("patric_id,genome,figfam,sample\n")
+
 	gm := make(map[string][]*meanvar.MeanVar)
 	pm := make(map[string][]*meanvar.MeanVar)
 	for gr := range grChan {
+		w.WriteString(fmt.Sprintf("%s,%s,%s,%s\n", gr.Feature.PatricID, gr.Feature.TaxID, gr.Feature.FigfamID, c.prefix))
 		for i := 0; i < len(gr.Values) && i < c.maxl; i++ {
 			v := gr.Values[i]
 			if !math.IsNaN(v) {

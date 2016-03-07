@@ -62,7 +62,7 @@ func main() {
 		defer featureDB.Close()
 		resultsDB := createReadOnlyEnv(*reportResultsDB)
 		defer resultsDB.Close()
-		reportcmd := cmdReport2{
+		reportcmd := cmdReport{
 			featureDB: featureDB,
 			resultsDB: resultsDB,
 			prefix:    *reportPrefix,
