@@ -27,7 +27,7 @@ type cmdCr struct {
 func (c *cmdCr) run() {
 	c.env = createEnv(c.dbfile)
 	defer c.env.Close()
-	c.featureEnv = createReadOnlyEnv(c.featureDbPath)
+	c.featureEnv = createNoLockEnv(c.featureDbPath)
 	defer c.featureEnv.Close()
 
 	createDBI(c.env, "cr")

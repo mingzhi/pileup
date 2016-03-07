@@ -39,7 +39,7 @@ func (c *cmdRead) run() {
 	c.env = createEnv(c.dbfile)
 	defer c.env.Close()
 
-	c.featureEnv = createReadOnlyEnv(c.featureDB)
+	c.featureEnv = createNoLockEnv(c.featureDB)
 	defer c.featureEnv.Close()
 
 	createDBI(c.env, "gene")
