@@ -129,11 +129,13 @@ func (c *cmdReport2) groupGr(grChan chan GeneRes) {
 				terms := strings.Split(pathways, ";")
 				for _, s := range terms {
 					id := strings.Split(s, "|")[0]
-					_, found := pm[id]
-					if !found {
-						pm[id] = newMeanVars(c.maxl)
+					if id != "" {
+						_, found := pm[id]
+						if !found {
+							pm[id] = newMeanVars(c.maxl)
+						}
+						pm[id][i].Increment(v)
 					}
-					pm[id][i].Increment(v)
 				}
 			}
 		}
