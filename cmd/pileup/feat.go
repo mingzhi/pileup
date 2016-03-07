@@ -23,7 +23,7 @@ type cmdFeat struct {
 
 func (c *cmdFeat) run() {
 	// create an environment and make sure it is eventually closed.
-	c.env = createLMDBEnv(c.out)
+	c.env = createEnv(c.out)
 	defer c.env.Close()
 
 	createDBI(c.env, "feature")

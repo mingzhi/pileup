@@ -36,10 +36,10 @@ type Genome struct {
 
 func (c *cmdRead) run() {
 	// create environment and dbi.
-	c.env = createLMDBEnv(c.dbfile)
+	c.env = createEnv(c.dbfile)
 	defer c.env.Close()
 
-	c.featureEnv = createLMDBEnv(c.featureDB)
+	c.featureEnv = createReadOnlyEnv(c.featureDB)
 	defer c.featureEnv.Close()
 
 	createDBI(c.env, "gene")

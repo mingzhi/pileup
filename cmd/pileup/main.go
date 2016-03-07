@@ -58,9 +58,9 @@ func main() {
 		readcmd.run()
 		break
 	case reportApp.FullCommand():
-		featureDB := createLMDBEnv(*reportFeatureDB)
+		featureDB := createReadOnlyEnv(*reportFeatureDB)
 		defer featureDB.Close()
-		resultsDB := createLMDBEnv(*reportResultsDB)
+		resultsDB := createReadOnlyEnv(*reportResultsDB)
 		defer resultsDB.Close()
 		reportcmd := cmdReport2{
 			featureDB: featureDB,

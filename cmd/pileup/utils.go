@@ -6,7 +6,7 @@ import (
 	"log"
 )
 
-func createLMDBEnv(path string) *lmdb.Env {
+func newEnv() *lmdb.Env {
 	env, err := lmdb.NewEnv()
 	if err != nil {
 		log.Fatalln(err)
@@ -22,7 +22,21 @@ func createLMDBEnv(path string) *lmdb.Env {
 		log.Fatalln(err)
 	}
 
-	err = env.Open(path, 0, 0644)
+	return env
+}
+
+func createReadOnlyEnv(path string) *lmdb.Env {
+	env := newEnv()
+	err := env.Open(path, lmdb.Readonly, 0644)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	return env
+}
+
+func createEnv(path string) *lmdb.Env {
+	env := newEnv()
+	err := env.Open(path, 0, 0644)
 	if err != nil {
 		log.Panicln(err)
 	}
