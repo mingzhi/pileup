@@ -81,14 +81,14 @@ func (c *cmdRead) groupSNPs(snpChan chan *pileup.SNP) chan *Gene {
 	ch := make(chan *Gene, 100)
 	go func() {
 		defer close(ch)
-		currentGenome := Genome{}
+		var currentGenome *Genome
 		var currentGene *Gene
 		var toUpdate bool
 
 		for snp := range snpChan {
 			// update genome features.
 			reference := cleanAccession(snp.Reference)
-			if reference != currentGenome.Reference {
+			if currentGenome == nil || reference != currentGenome.Reference {
 				currentGenome = c.queryGenome(reference)
 			}
 
@@ -108,12 +108,13 @@ func (c *cmdRead) groupSNPs(snpChan chan *pileup.SNP) chan *Gene {
 				}
 
 				if toUpdate {
-					f := findFeature(snp.Position, currentGenome.Features)
-					if f != nil {
-						currentGene = &Gene{}
-						currentGene.Feature = f
-					} else {
-						currentGene = nil
+					currentGene = nil
+					if currentGenome != nil {
+						f := findFeature(snp.Position, currentGenome.Features)
+						if f != nil {
+							currentGene = &Gene{}
+							currentGene.Feature = f
+						}
 					}
 				}
 
@@ -126,7 +127,7 @@ func (c *cmdRead) groupSNPs(snpChan chan *pileup.SNP) chan *Gene {
 	return ch
 }
 
-func (c *cmdRead) queryGenome(reference string) Genome {
+func (c *cmdRead) queryGenome(reference string) *Genome {
 	features := []*Feature{}
 	fn := func(tx *lmdb.Txn) error {
 		// first, we query genome bucket to
@@ -137,7 +138,6 @@ func (c *cmdRead) queryGenome(reference string) Genome {
 		}
 		v, err := tx.Get(dbi, []byte(reference))
 		if err != nil {
-			log.Panicln(err)
 			return err
 		}
 		// unpack gene IDs.
@@ -174,6 +174,12 @@ func (c *cmdRead) queryGenome(reference string) Genome {
 
 	err := c.featureEnv.View(fn)
 	if err != nil {
+		if lmdb.IsNotFound(err) {
+			if *debug {
+				log.Printf("key %s is not found\n", reference)
+			}
+			return nil
+		}
 		log.Panicln(err)
 	}
 
@@ -182,7 +188,7 @@ func (c *cmdRead) queryGenome(reference string) Genome {
 		sort.Sort(ByEnd{features})
 	}
 
-	return Genome{Reference: reference, Features: features}
+	return &Genome{Reference: reference, Features: features}
 }
 
 func cleanAccession(reference string) string {
