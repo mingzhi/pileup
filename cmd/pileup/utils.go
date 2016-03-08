@@ -6,6 +6,10 @@ import (
 	"log"
 )
 
+type KeyValue struct {
+	Key, Value []byte
+}
+
 func newEnv() *lmdb.Env {
 	env, err := lmdb.NewEnv()
 	if err != nil {

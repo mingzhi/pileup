@@ -33,6 +33,11 @@ var (
 	covResultsDb = covApp.Arg("results_db_path", "results db file").Required().String()
 	covGC        = covApp.Flag("codon", "codon table id").Default("11").String()
 	covMinDepth  = covApp.Flag("min_depth", "min depth").Default("5").Int()
+
+	mergeApp        = app.Command("merge", "merge mutliple mdb.")
+	mergeSampleFile = mergeApp.Arg("sample", "sample list file").Required().String()
+	mergeDbiName    = mergeApp.Flag("dbi", "dbi name").Default("cr").String()
+	mergeOutDb      = mergeApp.Arg("out", "out db path").Required().String()
 )
 
 func main() {
@@ -78,6 +83,14 @@ func main() {
 			minDepth:      *covMinDepth,
 		}
 		crcmd.run()
+		break
+	case mergeApp.FullCommand():
+		mergecmd := cmdMerge{
+			sampleFile: *mergeSampleFile,
+			dbiName:    *mergeDbiName,
+			dbOut:      *mergeOutDb,
+		}
+		mergecmd.run()
 		break
 	}
 }
