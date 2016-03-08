@@ -82,7 +82,6 @@ func (c *cmdMerge) readAllCr() chan KeyValue {
 		for _, s := range samples {
 			path := s + "_mdb"
 			env := createReadOnlyEnv(path)
-			defer env.Close()
 			ch := getAllCr(env, c.dbiName)
 			for kv := range ch {
 				k := []byte(s + "_" + string(kv.Key))
@@ -93,6 +92,8 @@ func (c *cmdMerge) readAllCr() chan KeyValue {
 			if *debug {
 				log.Println(s)
 			}
+
+			env.Close()
 		}
 	}()
 
