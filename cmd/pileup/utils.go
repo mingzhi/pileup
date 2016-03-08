@@ -21,7 +21,7 @@ func newEnv() *lmdb.Env {
 		log.Fatalln(err)
 	}
 
-	err = env.SetMapSize(1 << 32)
+	err = env.SetMapSize(1 << 42)
 	if err != nil {
 		log.Fatalln(err)
 	}
