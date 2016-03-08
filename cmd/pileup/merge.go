@@ -27,13 +27,23 @@ func (c *cmdMerge) run() {
 		kvChan := c.readAllCr()
 		for kv := range kvChan {
 			key, val := kv.Key, kv.Value
-			txn.Put(dbi, key, val, 0)
+			err := txn.Put(dbi, key, val, 0)
+			if err != nil {
+				return err
+			}
 		}
 
 		return nil
 	}
 
-	env.Update(fn)
+	err := env.Update(fn)
+	if err != nil {
+		if *debug {
+			log.Panicln(err)
+		} else {
+			log.Fatalln(err)
+		}
+	}
 }
 
 func (c *cmdMerge) readSamples() []string {
@@ -79,6 +89,10 @@ func (c *cmdMerge) readAllCr() chan KeyValue {
 				kv.Key = k
 				kvChan <- kv
 			}
+
+			if *debug {
+				log.Println(s)
+			}
 		}
 	}()
 
@@ -115,7 +129,14 @@ func getAllCr(env *lmdb.Env, dbname string) chan KeyValue {
 			return nil
 		}
 
-		env.View(fn)
+		err := env.View(fn)
+		if err != nil {
+			if *debug {
+				log.Panicln(err)
+			} else {
+				log.Fatalln(err)
+			}
+		}
 	}()
 	return ch
 }
