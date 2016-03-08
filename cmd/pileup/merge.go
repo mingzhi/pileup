@@ -18,7 +18,7 @@ type cmdMerge struct {
 func (c *cmdMerge) run() {
 	env := createEnv(c.dbOut)
 	defer env.Close()
-
+	createDBI(env, c.dbiName)
 	fn := func(txn *lmdb.Txn) error {
 		dbi, err := txn.OpenDBI(c.dbiName, 0)
 		if err != nil {
