@@ -23,7 +23,11 @@ func newEnv() *lmdb.Env {
 
 	err = env.SetMapSize(1 << 42)
 	if err != nil {
-		log.Fatalln(err)
+		if *debug {
+			log.Panicln(err)
+		} else {
+			log.Fatalln(err)
+		}
 	}
 
 	return env
@@ -33,7 +37,11 @@ func createReadOnlyEnv(path string) *lmdb.Env {
 	env := newEnv()
 	err := env.Open(path, lmdb.Readonly, 0644)
 	if err != nil {
-		log.Fatalln(err)
+		if *debug {
+			log.Panicln(err)
+		} else {
+			log.Fatalln(err)
+		}
 	}
 	return env
 }
@@ -42,7 +50,11 @@ func createNoLockEnv(path string) *lmdb.Env {
 	env := newEnv()
 	err := env.Open(path, lmdb.NoLock, 0644)
 	if err != nil {
-		log.Fatalln(err)
+		if *debug {
+			log.Panicln(err)
+		} else {
+			log.Fatalln(err)
+		}
 	}
 	return env
 }

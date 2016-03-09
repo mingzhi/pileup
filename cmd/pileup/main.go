@@ -28,6 +28,11 @@ var (
 	reportPrefix    = reportApp.Flag("prefix", "prefix").Required().String()
 	reportMaxl      = reportApp.Flag("maxl", "max length of correlations").Default("300").Int()
 
+	report2App       = app.Command("report2", "report db statistics.")
+	report2FeatureDB = report2App.Arg("feature_db_path", "feature db path").Required().String()
+	report2ResultsDB = report2App.Arg("results_db_path", "results db path").Required().String()
+	report2Prefix    = report2App.Flag("prefix", "prefix").Required().String()
+
 	covApp       = app.Command("cov", "calculate rate covariance.")
 	covFeatureDb = covApp.Arg("feature_db_path", "feature db path").Required().String()
 	covResultsDb = covApp.Arg("results_db_path", "results db file").Required().String()
@@ -74,6 +79,18 @@ func main() {
 			maxl:      *reportMaxl,
 		}
 		reportcmd.run()
+		break
+	case report2App.FullCommand():
+		featureDB := createNoLockEnv(*report2FeatureDB)
+		defer featureDB.Close()
+		resultsDB := createReadOnlyEnv(*report2ResultsDB)
+		defer resultsDB.Close()
+		reportcmd2 := cmdReport2{
+			featureDB: featureDB,
+			resultsDB: resultsDB,
+			prefix:    *report2Prefix,
+		}
+		reportcmd2.run()
 		break
 	case covApp.FullCommand():
 		crcmd := cmdCr{

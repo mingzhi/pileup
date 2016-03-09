@@ -36,47 +36,8 @@ func (c *cmdCr) run() {
 	c.load(crChan)
 }
 
-type SNPArr struct {
-	Key []byte
-	Arr []pileup.SNP
-}
-
 func (c *cmdCr) readSNPs() chan SNPArr {
-	ch := make(chan SNPArr)
-	fn := func(tx *lmdb.Txn) error {
-		dbi, err := tx.OpenDBI("gene", 0)
-		if err != nil {
-			return err
-		}
-
-		cur, err := tx.OpenCursor(dbi)
-		if err != nil {
-			return err
-		}
-		defer cur.Close()
-
-		for {
-			k, v, err := cur.Get(nil, nil, lmdb.Next)
-			if lmdb.IsNotFound(err) {
-				return nil
-			} else if err != nil {
-				return err
-			}
-
-			arr := []pileup.SNP{}
-			if err := msgpack.Unmarshal(v, &arr); err != nil {
-				return err
-			}
-
-			ch <- SNPArr{Key: k, Arr: arr}
-		}
-	}
-
-	go func() {
-		defer close(ch)
-		c.env.View(fn)
-	}()
-	return ch
+	return getAllSNPs(c.env)
 }
 
 func (c *cmdCr) calculateCr(in chan SNPArr) chan CovRes {
