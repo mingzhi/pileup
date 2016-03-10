@@ -160,15 +160,19 @@ func xcross(a []float64) []float64 {
 
 func cov(x, y []float64) float64 {
 	xy := 0.0
+	xbar := 0.0
+	ybar := 0.0
 	for i := range x {
 		xy += x[i] * y[i]
+		xbar += x[i]
+		ybar += y[i]
 	}
 	n := float64(len(x))
 	if n < 100 {
 		return math.NaN()
 	}
 
-	return xy / n
+	return xy/n - xbar/n*ybar/n
 }
 
 func isSynomous(s pileup.SNP, pos int, sequence []byte, gc *taxonomy.GeneticCode) bool {
