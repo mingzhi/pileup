@@ -4,6 +4,7 @@ import (
 	"github.com/bmatsuo/lmdb-go/lmdb"
 	"github.com/mingzhi/gomath/stat/desc/meanvar"
 	"log"
+	"os"
 )
 
 type KeyValue struct {
@@ -12,23 +13,12 @@ type KeyValue struct {
 
 func newEnv() *lmdb.Env {
 	env, err := lmdb.NewEnv()
-	if err != nil {
-		log.Fatalln(err)
-	}
-
+	raiseError(err)
 	err = env.SetMaxDBs(10)
-	if err != nil {
-		log.Fatalln(err)
-	}
+	raiseError(err)
 
 	err = env.SetMapSize(1 << 42)
-	if err != nil {
-		if *debug {
-			log.Panicln(err)
-		} else {
-			log.Fatalln(err)
-		}
-	}
+	raiseError(err)
 
 	return env
 }
@@ -36,35 +26,21 @@ func newEnv() *lmdb.Env {
 func createReadOnlyEnv(path string) *lmdb.Env {
 	env := newEnv()
 	err := env.Open(path, lmdb.Readonly, 0644)
-	if err != nil {
-		if *debug {
-			log.Panicln(err)
-		} else {
-			log.Fatalln(err)
-		}
-	}
+	raiseError(err)
 	return env
 }
 
 func createNoLockEnv(path string) *lmdb.Env {
 	env := newEnv()
 	err := env.Open(path, lmdb.NoLock, 0644)
-	if err != nil {
-		if *debug {
-			log.Panicln(err)
-		} else {
-			log.Fatalln(err)
-		}
-	}
+	raiseError(err)
 	return env
 }
 
 func createEnv(path string) *lmdb.Env {
 	env := newEnv()
 	err := env.Open(path, 0, 0644)
-	if err != nil {
-		log.Panicln(err)
-	}
+	raiseError(err)
 
 	return env
 }
@@ -86,9 +62,7 @@ func createDBI(env *lmdb.Env, name string) {
 		return nil
 	}
 	err := env.Update(fn)
-	if err != nil {
-		log.Fatalln(err)
-	}
+	raiseError(err)
 }
 
 func newMeanVars(size int) []*meanvar.MeanVar {
@@ -97,4 +71,28 @@ func newMeanVars(size int) []*meanvar.MeanVar {
 		mvs[i] = meanvar.New()
 	}
 	return mvs
+}
+
+func openFile(filename string) *os.File {
+	f, err := os.Open(filename)
+	raiseError(err)
+
+	return f
+}
+
+func createFile(filename string) *os.File {
+	f, err := os.Create(filename)
+	raiseError(err)
+
+	return f
+}
+
+func raiseError(err error) {
+	if err != nil {
+		if *debug {
+			log.Panic(err)
+		} else {
+			log.Fatalln(err)
+		}
+	}
 }

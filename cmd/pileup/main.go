@@ -11,6 +11,13 @@ var (
 	debug = app.Flag("debug", "Enable debug mode.").Bool()
 	ncpu  = app.Flag("ncpu", "number of CPUs for using.").Default("0").Int()
 
+	filterApp     = app.Command("filter", "filter reads.")
+	filterFna     = filterApp.Arg("fna_file", "reference genome file.").Required().String()
+	filterBam     = filterApp.Arg("bam_file", "bam file.").Required().String()
+	filterOut     = filterApp.Arg("out_file", "out file.").Required().String()
+	filterMaxDist = filterApp.Flag("max_dist", "max distance.").Default("0.05").Float64()
+	filterMapQ    = filterApp.Flag("mapQ", "min mapQ").Default("30").Int()
+
 	featApp = app.Command("feat", "read genome features.")
 	featDir = featApp.Arg("genome_dir", "genome directory").Required().String()
 	featOut = featApp.Arg("feature_db_path", "feature db path").Required().String()
@@ -50,6 +57,15 @@ func main() {
 	runtime.GOMAXPROCS(*ncpu)
 
 	switch command {
+	case filterApp.FullCommand():
+		filtercmd := cmdFilter{
+			fnaFile:     *filterFna,
+			bamFile:     *filterBam,
+			outFile:     *filterOut,
+			maxDistance: *filterMaxDist,
+			mapQ:        *filterMapQ,
+		}
+		filtercmd.run()
 	case featApp.FullCommand():
 		featcmd := cmdFeat{
 			out: *featOut,
