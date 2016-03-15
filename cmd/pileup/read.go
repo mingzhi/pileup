@@ -20,6 +20,7 @@ type cmdRead struct {
 
 	env        *lmdb.Env
 	featureEnv *lmdb.Env
+	sizeDB     int64
 }
 
 // Gene contains a group of SNP and its feature.
@@ -36,10 +37,24 @@ type Genome struct {
 
 func (c *cmdRead) run() {
 	// create environment and dbi.
-	c.env = createEnv(c.dbfile)
+	numDB := 10
+	c.sizeDB = 1 << 30
+	var err error
+	c.env, err = createEnv(c.dbfile, numDB, c.sizeDB)
+	for lmdb.IsMapFull(err) {
+		c.sizeDB *= 2
+		c.env, err = createEnv(c.dbfile, numDB, c.sizeDB)
+	}
+	raiseError(err)
 	defer c.env.Close()
 
-	c.featureEnv = createNoLockEnv(c.featureDB)
+	var sizeDB int64 = 1 << 30
+	c.featureEnv, err = createNoLockEnv(c.featureDB, numDB, sizeDB)
+	for lmdb.IsMapFull(err) {
+		sizeDB *= 2
+		c.featureEnv, err = createNoLockEnv(c.featureDB, numDB, sizeDB)
+	}
+	raiseError(err)
 	defer c.featureEnv.Close()
 
 	createDBI(c.env, "gene")
@@ -49,7 +64,7 @@ func (c *cmdRead) run() {
 	geneChan := c.groupSNPs(snpChan)
 	c.loadGenes(geneChan)
 
-	err := c.env.View(func(tx *lmdb.Txn) error {
+	err = c.env.View(func(tx *lmdb.Txn) error {
 		dbi, err := tx.OpenDBI("gene", 0)
 		if err != nil {
 			return err

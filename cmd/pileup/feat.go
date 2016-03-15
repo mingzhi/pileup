@@ -18,26 +18,84 @@ type cmdFeat struct {
 	dir string
 	out string
 
-	env *lmdb.Env
+	env    *lmdb.Env
+	sizeDB int64
 }
 
 func (c *cmdFeat) run() {
 	// create an environment and make sure it is eventually closed.
-	c.env = createEnv(c.out)
+	var numDB int = 10
+	c.sizeDB = 1 * 1024 * 1024 * 1024
+	var err error
+	// create to create env
+	c.env, err = createEnv(c.out, numDB, c.sizeDB)
+	for lmdb.IsMapFull(err) {
+		c.sizeDB *= 2
+		c.env, err = createEnv(c.out, numDB, c.sizeDB)
+	}
+	raiseError(err)
 	defer c.env.Close()
 
 	createDBI(c.env, "feature")
 	createDBI(c.env, "genome")
-
 	featureFileList := c.walk(".PATRIC.features.tab")
 	for _, featureFile := range featureFileList {
 		features := readFeatures(featureFile)
 		c.loadFeatures(features)
 	}
+
+	err = createDBI(c.env, "fna")
+	for lmdb.IsMapFull(err) {
+		c.sizeDB = c.sizeDB * 2
+		err = c.env.SetMapSize(c.sizeDB)
+		raiseError(err)
+		if *debug {
+			log.Printf("increase max database size to %.2f G\n", float64(c.sizeDB)/(1024*1024*1024.0))
+		}
+		err = createDBI(c.env, "fna")
+	}
+	raiseError(err)
+	fnaFileList := c.walk(".fna")
+	getAcc := func(s string) string { return strings.Split(strings.TrimSpace(s), " ")[0] }
+	for _, fnaFile := range fnaFileList {
+		accessions, genomes := readFna(fnaFile, getAcc)
+		c.loadFna(accessions, genomes)
+	}
+}
+
+func (c *cmdFeat) loadFna(accessions []string, genomes [][]byte) {
+	fn := func(txn *lmdb.Txn) error {
+		dbi, err := txn.OpenDBI("fna", 0)
+		if err != nil {
+			return err
+		}
+		for i := range accessions {
+			key := []byte(accessions[i])
+			val := genomes[i]
+			err := txn.Put(dbi, key, val, 0)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+retry:
+	err := c.env.Update(fn)
+	if lmdb.IsMapFull(err) {
+		c.sizeDB = c.sizeDB * 2
+		err = c.env.SetMapSize(c.sizeDB)
+		raiseError(err)
+		if *debug {
+			log.Printf("increase max database size to %.2f G\n", float64(c.sizeDB)/(1024*1024*1024.0))
+		}
+		goto retry
+	}
+	raiseError(err)
 }
 
 func (c *cmdFeat) loadFeatures(features []Feature) {
-	err := c.env.Update(func(txn *lmdb.Txn) error {
+	fn := func(txn *lmdb.Txn) error {
 		genomeGeneMap := make(map[string][]string)
 		for _, f := range features {
 			genomeGeneMap[f.Genome] = append(genomeGeneMap[f.Genome], f.PatricID)
@@ -79,11 +137,20 @@ func (c *cmdFeat) loadFeatures(features []Feature) {
 		}
 
 		return nil
-	})
-
-	if err != nil {
-		log.Fatalln(err)
 	}
+
+retry:
+	err := c.env.Update(fn)
+	if lmdb.IsMapFull(err) {
+		c.sizeDB = c.sizeDB * 2
+		err = c.env.SetMapSize(c.sizeDB)
+		raiseError(err)
+		if *debug {
+			log.Printf("increase max database size to %.2f G\n", float64(c.sizeDB)/(1024*1024*1024.0))
+		}
+		goto retry
+	}
+	raiseError(err)
 }
 
 // walk returns a list of feature files.

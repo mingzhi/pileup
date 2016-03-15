@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/alecthomas/kingpin"
+	"github.com/bmatsuo/lmdb-go/lmdb"
 	"os"
 	"runtime"
 )
@@ -11,14 +12,14 @@ var (
 	debug = app.Flag("debug", "Enable debug mode.").Bool()
 	ncpu  = app.Flag("ncpu", "number of CPUs for using.").Default("0").Int()
 
-	filterApp     = app.Command("filter", "filter reads.")
-	filterFna     = filterApp.Arg("fna_file", "reference genome file.").Required().String()
-	filterBam     = filterApp.Arg("bam_file", "bam file.").Required().String()
-	filterOut     = filterApp.Arg("out_file", "out file.").Required().String()
-	filterMaxDist = filterApp.Flag("max_dist", "max distance.").Default("0.05").Float64()
-	filterMapQ    = filterApp.Flag("mapQ", "min mapQ").Default("30").Int()
+	filterApp       = app.Command("filter", "filter reads.")
+	filterFeatureDB = filterApp.Arg("feature_db_path", "feature db path.").Required().String()
+	filterBam       = filterApp.Arg("bam_file", "bam file.").Required().String()
+	filterOut       = filterApp.Arg("out_file", "out file.").Required().String()
+	filterMaxDist   = filterApp.Flag("max_dist", "max distance.").Default("0.05").Float64()
+	filterMapQ      = filterApp.Flag("mapQ", "min mapQ").Default("30").Int()
 
-	featApp = app.Command("feat", "read genome features.")
+	featApp = app.Command("feat", "read and load genome sequence and features into a LMDB.")
 	featDir = featApp.Arg("genome_dir", "genome directory").Required().String()
 	featOut = featApp.Arg("feature_db_path", "feature db path").Required().String()
 
@@ -59,7 +60,7 @@ func main() {
 	switch command {
 	case filterApp.FullCommand():
 		filtercmd := cmdFilter{
-			fnaFile:     *filterFna,
+			featureDB:   *filterFeatureDB,
 			bamFile:     *filterBam,
 			outFile:     *filterOut,
 			maxDistance: *filterMaxDist,
@@ -84,9 +85,23 @@ func main() {
 		readcmd.run()
 		break
 	case reportApp.FullCommand():
-		featureDB := createNoLockEnv(*reportFeatureDB)
+		var sizeDB int64 = 1 << 30
+		numDB := 10
+		featureDB, err := createNoLockEnv(*reportFeatureDB, numDB, sizeDB)
+		for lmdb.IsMapFull(err) {
+			sizeDB *= 2
+			featureDB, err = createNoLockEnv(*reportFeatureDB, numDB, sizeDB)
+		}
+		raiseError(err)
 		defer featureDB.Close()
-		resultsDB := createReadOnlyEnv(*reportResultsDB)
+
+		sizeDB = 1 << 30
+		resultsDB, err := createNoLockEnv(*reportResultsDB, numDB, sizeDB)
+		for lmdb.IsMapFull(err) {
+			sizeDB *= 2
+			resultsDB, err = createNoLockEnv(*reportResultsDB, numDB, sizeDB)
+		}
+		raiseError(err)
 		defer resultsDB.Close()
 		reportcmd := cmdReport{
 			featureDB: featureDB,
@@ -96,18 +111,18 @@ func main() {
 		}
 		reportcmd.run()
 		break
-	case report2App.FullCommand():
-		featureDB := createNoLockEnv(*report2FeatureDB)
-		defer featureDB.Close()
-		resultsDB := createReadOnlyEnv(*report2ResultsDB)
-		defer resultsDB.Close()
-		reportcmd2 := cmdReport2{
-			featureDB: featureDB,
-			resultsDB: resultsDB,
-			prefix:    *report2Prefix,
-		}
-		reportcmd2.run()
-		break
+	// case report2App.FullCommand():
+	// 	featureDB := createNoLockEnv(*report2FeatureDB, 10, 0)
+	// 	defer featureDB.Close()
+	// 	resultsDB := createReadOnlyEnv(*report2ResultsDB, 10, 0)
+	// 	defer resultsDB.Close()
+	// 	reportcmd2 := cmdReport2{
+	// 		featureDB: featureDB,
+	// 		resultsDB: resultsDB,
+	// 		prefix:    *report2Prefix,
+	// 	}
+	// 	reportcmd2.run()
+	// 	break
 	case covApp.FullCommand():
 		crcmd := cmdCr{
 			dbfile:        *covResultsDb,

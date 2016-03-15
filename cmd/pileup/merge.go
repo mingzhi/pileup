@@ -13,11 +13,21 @@ type cmdMerge struct {
 	sampleFile string
 	dbiName    string
 	dbOut      string
+
+	sizeDB int64
 }
 
 func (c *cmdMerge) run() {
-	env := createEnv(c.dbOut)
+	numDB := 10
+	c.sizeDB = 1 << 30
+	env, err := createEnv(c.dbOut, numDB, c.sizeDB)
+	for lmdb.IsMapFull(err) {
+		c.sizeDB *= 2
+		env, err = createEnv(c.dbOut, numDB, c.sizeDB)
+	}
+	raiseError(err)
 	defer env.Close()
+
 	createDBI(env, c.dbiName)
 	fn := func(txn *lmdb.Txn) error {
 		dbi, err := txn.OpenDBI(c.dbiName, 0)
@@ -36,7 +46,7 @@ func (c *cmdMerge) run() {
 		return nil
 	}
 
-	err := env.Update(fn)
+	err = env.Update(fn)
 	if err != nil {
 		if *debug {
 			log.Panicln(err)
@@ -81,7 +91,7 @@ func (c *cmdMerge) readAllCr() chan KeyValue {
 		samples := c.readSamples()
 		for _, s := range samples {
 			path := s + "_mdb"
-			env := createReadOnlyEnv(path)
+			env := createReadOnlyEnv(path, 10, 0)
 			ch := getAllCr(env, c.dbiName)
 			for kv := range ch {
 				k := []byte(s + "_" + string(kv.Key))

@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"github.com/bmatsuo/lmdb-go/lmdb"
-	"github.com/boltdb/bolt"
 	"github.com/mingzhi/biogo/pileup"
 	"github.com/mingzhi/ncbiftp/taxonomy"
 	"gopkg.in/vmihailenco/msgpack.v2"
@@ -16,18 +15,34 @@ type cmdCr struct {
 	codonID       string
 	featureDbPath string
 	minDepth      int
-
-	db *bolt.DB
-	gc *taxonomy.GeneticCode
+	gc            *taxonomy.GeneticCode
 
 	env        *lmdb.Env
+	sizeDB     int64
 	featureEnv *lmdb.Env
 }
 
 func (c *cmdCr) run() {
-	c.env = createEnv(c.dbfile)
+	numDB := 10
+	c.sizeDB = 1 << 30
+	var err error
+	c.env, err = createEnv(c.dbfile, numDB, c.sizeDB)
+	for lmdb.IsMapFull(err) {
+		c.sizeDB *= 2
+		c.env, err = createEnv(c.dbfile, numDB, c.sizeDB)
+	}
+	raiseError(err)
 	defer c.env.Close()
-	c.featureEnv = createNoLockEnv(c.featureDbPath)
+
+	// open feature db
+	var sizeDB int64 = 1 << 30
+
+	c.featureEnv, err = createNoLockEnv(c.featureDbPath, numDB, sizeDB)
+	for lmdb.IsMapFull(err) {
+		sizeDB *= 2
+		c.featureEnv, err = createNoLockEnv(c.featureDbPath, numDB, sizeDB)
+	}
+	raiseError(err)
 	defer c.featureEnv.Close()
 
 	createDBI(c.env, "cr")

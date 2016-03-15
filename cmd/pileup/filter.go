@@ -14,9 +14,9 @@ import (
 )
 
 type cmdFilter struct {
-	fnaFile     string
 	bamFile     string
 	outFile     string
+	featureDB   string
 	maxDistance float64
 	mapQ        int
 
@@ -37,25 +37,15 @@ func (c *cmdFilter) run() {
 	ch := c.readBamFile()
 	filteredChan1 := c.filter(ch)
 
+	diverFiler := DiversityFilter{
+		Cutoff: c.maxDistance,
+	}
+	diverFiler.OpenFeatureDB(c.featureDB)
 	tempDir, err := ioutil.TempDir("temp", "filter")
 	raiseError(err)
 	defer os.RemoveAll(tempDir)
-
-	env, err := lmdb.NewEnv()
-	raiseError(err)
-	err = env.SetMaxDBs(10)
-	raiseError(err)
-	err = env.SetMapSize(1 << 31)
-	raiseError(err)
-	env.Open(tempDir, 0, 0644)
-	defer env.Close()
-
-	diverFiler := DiversityFilter{
-		RefFile: c.fnaFile,
-		Cutoff:  c.maxDistance,
-		MDB:     env,
-	}
-	diverFiler.Init()
+	diverFiler.CreateTempDB(tempDir)
+	defer diverFiler.Close()
 	filteredChan2 := diverFiler.FilterAll(filteredChan1)
 
 	c.write(header, filteredChan2)
@@ -174,64 +164,43 @@ func (p *ProperMapFilter) Filter(r *sam.Record) bool {
 }
 
 type DiversityFilter struct {
-	RefFile string
-	Cutoff  float64
-	MDB     *lmdb.Env
+	Cutoff    float64
+	db        *lmdb.Env
+	featureDB *lmdb.Env
+
+	sizeDB int64
 }
 
-func (d *DiversityFilter) Init() {
-	createDBI(d.MDB, "read")
-	createDBI(d.MDB, "genome")
-	d.loadGenome()
+func (d *DiversityFilter) Close() {
+	d.db.Close()
+	d.featureDB.Close()
 }
 
-func (d *DiversityFilter) loadGenome() {
-	f := openFile(d.RefFile)
-	defer f.Close()
-
-	fastaReader := seq.NewFastaReader(f)
-	fastaReader.DeflineParser = func(s string) string { return strings.Split(strings.TrimSpace(s), " ")[0] }
-	buf := make([]*seq.Sequence, 100)
-	k := 0
-	for {
-		s, err := fastaReader.Read()
-		if err != nil {
-			if err != io.EOF {
-				raiseError(err)
-			}
-			break
-		}
-
-		if k >= len(buf) {
-			d.loadGenomeBuf(buf)
-			k = 0
-		}
-		buf[k] = s
-		k++
+// create temp db
+func (d *DiversityFilter) CreateTempDB(path string) {
+	var numDB int = 10
+	d.sizeDB = 1 << 30
+	var err error
+	d.db, err = createEnv(path, numDB, d.sizeDB)
+	for lmdb.IsMapFull(err) {
+		d.sizeDB *= 2
+		d.db, err = createEnv(path, numDB, d.sizeDB)
 	}
+	raiseError(err)
 
-	d.loadGenomeBuf(buf)
-	log.Println("finish loading genome")
+	err = createDBI(d.db, "read")
+	raiseError(err)
 }
 
-func (d *DiversityFilter) loadGenomeBuf(genomes []*seq.Sequence) {
-	fn := func(txn *lmdb.Txn) error {
-		dbi, err := txn.OpenDBI("genome", 0)
-		if err != nil {
-			return err
-		}
-		for _, s := range genomes {
-			key := []byte(s.Id)
-			val := bytes.ToUpper(s.Seq)
-			err = txn.Put(dbi, key, val, 0)
-			if err != nil {
-				return err
-			}
-		}
-		return nil
+func (d *DiversityFilter) OpenFeatureDB(path string) {
+	var numDB int = 10
+	var sizeDB int64 = 1 << 30
+	var err error
+	d.featureDB, err = createEnv(path, numDB, sizeDB)
+	for lmdb.IsMapFull(err) {
+		sizeDB *= 2
+		d.featureDB, err = createEnv(path, numDB, sizeDB)
 	}
-
-	err := d.MDB.Update(fn)
 	raiseError(err)
 }
 
@@ -241,10 +210,7 @@ func (d *DiversityFilter) filter(buf []*sam.Record, acc string, genome []byte) (
 		if err != nil {
 			return err
 		}
-		genomeDbi, err := txn.OpenDBI("genome", 0)
-		if err != nil {
-			return err
-		}
+
 		for _, r := range buf {
 			key := []byte(r.Name)
 			val, err := txn.Get(dbi, key)
@@ -267,7 +233,7 @@ func (d *DiversityFilter) filter(buf []*sam.Record, acc string, genome []byte) (
 				raiseError(err)
 				if r.Ref.Name() == mate.Ref.Name() {
 					if acc != r.Ref.Name() {
-						genome, err = d.findGenome(r, txn, genomeDbi)
+						genome, err = d.findGenome(r, d.featureDB, "fna")
 						raiseError(err)
 						acc = r.Ref.Name()
 						if *debug {
@@ -293,7 +259,14 @@ func (d *DiversityFilter) filter(buf []*sam.Record, acc string, genome []byte) (
 		}
 		return nil
 	}
-	err := d.MDB.Update(fn)
+retry:
+	err := d.db.Update(fn)
+	if lmdb.IsMapFull(err) {
+		d.sizeDB *= 2
+		err = d.db.SetMapSize(d.sizeDB)
+		raiseError(err)
+		goto retry
+	}
 	raiseError(err)
 
 	genome1 = genome
@@ -301,9 +274,18 @@ func (d *DiversityFilter) filter(buf []*sam.Record, acc string, genome []byte) (
 	return
 }
 
-func (d *DiversityFilter) findGenome(r *sam.Record, txn *lmdb.Txn, dbi lmdb.DBI) (val []byte, err error) {
-	key := []byte(r.Ref.Name())
-	val, err = txn.Get(dbi, key)
+func (d *DiversityFilter) findGenome(r *sam.Record, env *lmdb.Env, dbname string) (val []byte, err error) {
+	fn := func(txn *lmdb.Txn) error {
+		dbi, err := txn.OpenDBI(dbname, 0)
+		if err != nil {
+			return err
+		}
+		key := []byte(r.Ref.Name())
+		val, err = txn.Get(dbi, key)
+		val = bytes.ToUpper(val)
+		return err
+	}
+	err = env.View(fn)
 	return
 }
 

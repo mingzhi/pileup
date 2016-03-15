@@ -11,41 +11,45 @@ type KeyValue struct {
 	Key, Value []byte
 }
 
-func newEnv() *lmdb.Env {
+func newEnv(numDB int, sizeDB int64) *lmdb.Env {
 	env, err := lmdb.NewEnv()
 	raiseError(err)
-	err = env.SetMaxDBs(10)
+	err = env.SetMaxDBs(numDB)
 	raiseError(err)
 
-	err = env.SetMapSize(1 << 42)
+	err = env.SetMapSize(sizeDB)
 	raiseError(err)
 
 	return env
 }
 
-func createReadOnlyEnv(path string) *lmdb.Env {
-	env := newEnv()
+func createReadOnlyEnv(path string, numDB int, sizeDB int64) *lmdb.Env {
+	env := newEnv(numDB, sizeDB)
 	err := env.Open(path, lmdb.Readonly, 0644)
 	raiseError(err)
 	return env
 }
 
-func createNoLockEnv(path string) *lmdb.Env {
-	env := newEnv()
-	err := env.Open(path, lmdb.NoLock, 0644)
-	raiseError(err)
-	return env
+func createNoLockEnv(path string, numDB int, sizeDB int64) (env *lmdb.Env, err error) {
+	env = newEnv(numDB, sizeDB)
+	err = env.Open(path, lmdb.NoLock, 0644)
+	return
 }
 
-func createEnv(path string) *lmdb.Env {
-	env := newEnv()
-	err := env.Open(path, 0, 0644)
-	raiseError(err)
-
-	return env
+func createEnv(path string, numDB int, sizeDB int64) (env *lmdb.Env, err error) {
+	env = newEnv(numDB, sizeDB)
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			os.Mkdir(path, 0644)
+		} else {
+			raiseError(err)
+		}
+	}
+	err = env.Open(path, 0, 0644)
+	return
 }
 
-func createDBI(env *lmdb.Env, name string) {
+func createDBI(env *lmdb.Env, name string) error {
 	fn := func(txn *lmdb.Txn) error {
 		var dbi lmdb.DBI
 		var err error
@@ -61,8 +65,9 @@ func createDBI(env *lmdb.Env, name string) {
 
 		return nil
 	}
+
 	err := env.Update(fn)
-	raiseError(err)
+	return err
 }
 
 func newMeanVars(size int) []*meanvar.MeanVar {
