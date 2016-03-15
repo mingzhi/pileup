@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"github.com/biogo/hts/bam"
 	"github.com/biogo/hts/sam"
+	"github.com/bmatsuo/lmdb-go/lmdb"
 	"github.com/mingzhi/biogo/seq"
 	"io"
+	"io/ioutil"
 	"log"
+	"os"
 	"strings"
 )
 
@@ -28,11 +31,34 @@ func (c *cmdFilter) run() {
 	c.filters = append(c.filters, &MapQFilter{Cutoff: c.mapQ})
 	c.filters = append(c.filters, &ProperPairFilter{})
 	c.filters = append(c.filters, &ProperMapFilter{})
-	c.filters = append(c.filters, &DiversityFilter{RefMap: readRefSeq(c.fnaFile), Cutoff: c.maxDistance})
+
 	header := c.readBamHeader()
+
 	ch := c.readBamFile()
-	filteredChan := c.filter(ch)
-	c.write(header, filteredChan)
+	filteredChan1 := c.filter(ch)
+
+	tempDir, err := ioutil.TempDir("temp", "filter")
+	raiseError(err)
+	defer os.RemoveAll(tempDir)
+
+	env, err := lmdb.NewEnv()
+	raiseError(err)
+	err = env.SetMaxDBs(10)
+	raiseError(err)
+	err = env.SetMapSize(1 << 31)
+	raiseError(err)
+	env.Open(tempDir, 0, 0644)
+	defer env.Close()
+
+	diverFiler := DiversityFilter{
+		RefFile: c.fnaFile,
+		Cutoff:  c.maxDistance,
+		MDB:     env,
+	}
+	diverFiler.Init()
+	filteredChan2 := diverFiler.FilterAll(filteredChan1)
+
+	c.write(header, filteredChan2)
 }
 
 func (c *cmdFilter) readBamHeader() *sam.Header {
@@ -148,44 +174,192 @@ func (p *ProperMapFilter) Filter(r *sam.Record) bool {
 }
 
 type DiversityFilter struct {
-	RefMap map[string][]byte
-	Cutoff float64
+	RefFile string
+	Cutoff  float64
+	MDB     *lmdb.Env
 }
 
-func (s *DiversityFilter) Filter(r *sam.Record) bool {
-	acc := r.Ref.Name()
-	genome, found := s.RefMap[acc]
-	if !found {
-		if *debug {
-			log.Printf("%s not found\n", acc)
+func (d *DiversityFilter) Init() {
+	createDBI(d.MDB, "read")
+	createDBI(d.MDB, "genome")
+	d.loadGenome()
+}
+
+func (d *DiversityFilter) loadGenome() {
+	f := openFile(d.RefFile)
+	defer f.Close()
+
+	fastaReader := seq.NewFastaReader(f)
+	fastaReader.DeflineParser = func(s string) string { return strings.Split(strings.TrimSpace(s), " ")[0] }
+	buf := make([]*seq.Sequence, 100)
+	k := 0
+	for {
+		s, err := fastaReader.Read()
+		if err != nil {
+			if err != io.EOF {
+				raiseError(err)
+			}
+			break
 		}
-		return false
+
+		if k >= len(buf) {
+			d.loadGenomeBuf(buf)
+			k = 0
+		}
+		buf[k] = s
+		k++
 	}
 
+	d.loadGenomeBuf(buf)
+	log.Println("finish loading genome")
+}
+
+func (d *DiversityFilter) loadGenomeBuf(genomes []*seq.Sequence) {
+	fn := func(txn *lmdb.Txn) error {
+		dbi, err := txn.OpenDBI("genome", 0)
+		if err != nil {
+			return err
+		}
+		for _, s := range genomes {
+			key := []byte(s.Id)
+			val := bytes.ToUpper(s.Seq)
+			err = txn.Put(dbi, key, val, 0)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	err := d.MDB.Update(fn)
+	raiseError(err)
+}
+
+func (d *DiversityFilter) filter(buf []*sam.Record, acc string, genome []byte) (out []*sam.Record, acc1 string, genome1 []byte) {
+	fn := func(txn *lmdb.Txn) error {
+		dbi, err := txn.OpenDBI("read", 0)
+		if err != nil {
+			return err
+		}
+		genomeDbi, err := txn.OpenDBI("genome", 0)
+		if err != nil {
+			return err
+		}
+		for _, r := range buf {
+			key := []byte(r.Name)
+			val, err := txn.Get(dbi, key)
+			if err != nil {
+				if lmdb.IsNotFound(err) {
+					val, err = r.MarshalText()
+					if err != nil {
+						return err
+					}
+					err = txn.Put(dbi, key, val, 0)
+					if err != nil {
+						return err
+					}
+				} else {
+					return err
+				}
+			} else {
+				var mate *sam.Record = &sam.Record{}
+				err := mate.UnmarshalText(val)
+				raiseError(err)
+				if r.Ref.Name() == mate.Ref.Name() {
+					if acc != r.Ref.Name() {
+						genome, err = d.findGenome(r, txn, genomeDbi)
+						raiseError(err)
+						acc = r.Ref.Name()
+						if *debug {
+							log.Println(acc)
+						}
+					}
+
+					diff1, len1 := d.Diff(r, genome)
+					diff2, len2 := d.Diff(mate, genome)
+					if len1 > 0 && len2 > 0 && float64(diff1+diff2)/float64(len1+len2) <= d.Cutoff {
+						out = append(out, r)
+						out = append(out, mate)
+					} else {
+						if *debug {
+							log.Printf("%d, %d, %d, %d\n", diff1, diff2, len1, len2)
+						}
+					}
+				}
+
+				txn.Del(dbi, key, val)
+			}
+
+		}
+		return nil
+	}
+	err := d.MDB.Update(fn)
+	raiseError(err)
+
+	genome1 = genome
+	acc1 = acc
+	return
+}
+
+func (d *DiversityFilter) findGenome(r *sam.Record, txn *lmdb.Txn, dbi lmdb.DBI) (val []byte, err error) {
+	key := []byte(r.Ref.Name())
+	val, err = txn.Get(dbi, key)
+	return
+}
+
+func (d *DiversityFilter) FilterAll(ch chan *sam.Record) chan *sam.Record {
+	filteredChan := make(chan *sam.Record)
+
+	go func() {
+		defer close(filteredChan)
+		buf := make([]*sam.Record, 10000)
+		var out []*sam.Record
+		var acc string
+		var genome []byte
+		k := 0
+		for r := range ch {
+			if k >= len(buf) {
+				out, acc, genome = d.filter(buf, acc, genome)
+				for _, r1 := range out {
+					filteredChan <- r1
+				}
+				k = 0
+			}
+			buf[k] = r
+			k++
+		}
+
+		out, _, _ = d.filter(buf, acc, genome)
+		for _, r1 := range out {
+			filteredChan <- r1
+		}
+	}()
+
+	return filteredChan
+}
+
+func (d *DiversityFilter) Diff(r *sam.Record, genome []byte) (diff, length int) {
 	start := r.Start()
 	end := r.End()
 	if start < 0 || end > len(genome) {
 		if *debug {
 			text, err := r.MarshalSAM(sam.FlagDecimal)
 			raiseError(err)
-			log.Printf("acc: %s, genome length %d, read starts at %d and ends at %d: %s\n", acc, len(genome), start, end, text)
+			log.Printf("acc: %s, genome length %d, read starts at %d and ends at %d: %s\n", r.Ref.Name(), len(genome), start, end, text)
 		}
-		return false
+		length = 0
+		return
 	}
 	refSeq := genome[start:end]
-	diff := 0
+	diff = 0
 	read := map2Ref(r)
-	for i := 0; i < len(read); i++ {
+	length = len(read)
+	for i := 0; i < length; i++ {
 		if read[i] != refSeq[i] {
 			diff++
 		}
 	}
-
-	if float64(diff)/float64(len(read)) > s.Cutoff {
-		return false
-	}
-
-	return true
+	return
 }
 
 type MapQFilter struct {
