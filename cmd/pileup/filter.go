@@ -196,10 +196,10 @@ func (d *DiversityFilter) OpenFeatureDB(path string) {
 	var numDB int = 10
 	var sizeDB int64 = 1 << 30
 	var err error
-	d.featureDB, err = createEnv(path, numDB, sizeDB)
+	d.featureDB, err = createNoLockEnv(path, numDB, sizeDB)
 	for lmdb.IsMapFull(err) {
 		sizeDB *= 2
-		d.featureDB, err = createEnv(path, numDB, sizeDB)
+		d.featureDB, err = createNoLockEnv(path, numDB, sizeDB)
 	}
 	raiseError(err)
 }
